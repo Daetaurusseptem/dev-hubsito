@@ -47,7 +47,7 @@ Desde **Settings → Side Waifu Module** puedes elegir presencia completa, compa
 
 ## App de Windows
 
-La app usa Tauri 2 y empaqueta el servidor Bun como sidecar. No hace falta tener una terminal abierta para usarla.
+La app usa Tauri 2 y empaqueta el servidor Bun como sidecar. No hace falta tener una terminal abierta para usarla. La ventana utiliza una barra propia que sigue los colores del Theme Maker y conserva minimizar, maximizar, arrastrar y cerrar.
 
 Primera preparación de Windows:
 

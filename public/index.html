@@ -5,8 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b1020">
   <title>DevHubsito — by Daetaurus Jaime</title>
+  <script>if (window.__TAURI_INTERNALS__ || window.__TAURI__) document.documentElement.classList.add('tauri-app')</script>
   <link rel="icon" href="/devhubsito.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/titlebar.css">
   <link rel="stylesheet" href="/discovery.css">
   <link rel="stylesheet" href="/watch.css">
   <link rel="stylesheet" href="/folder-browser.css">
@@ -16,6 +18,14 @@
   <link rel="stylesheet" href="/feedback.css">
 </head>
 <body>
+  <header id="tauriTitlebar" class="tauri-titlebar" data-tauri-drag-region aria-label="Barra de ventana">
+    <div class="tauri-titlebar-brand" data-tauri-drag-region><img src="/devhubsito.svg" alt=""><span data-tauri-drag-region>DevHubsito</span><small data-tauri-drag-region>by Daetaurus Jaime</small></div>
+    <div class="tauri-window-controls">
+      <button id="windowMinimize" type="button" aria-label="Minimizar" title="Minimizar"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5h8"/></svg></button>
+      <button id="windowMaximize" type="button" aria-label="Maximizar" title="Maximizar"><svg class="maximize-icon" viewBox="0 0 12 12" aria-hidden="true"><rect x="2.25" y="2.25" width="7.5" height="7.5" rx=".6"/></svg><svg class="restore-icon" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 3.25h4.75v4.8M3.25 4H8v4.75H3.25z"/></svg></button>
+      <button id="windowClose" class="close" type="button" aria-label="Cerrar" title="Cerrar"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2.5 2.5 7 7m0-7-7 7"/></svg></button>
+    </div>
+  </header>
   <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
   <main class="shell">
     <header class="topbar">

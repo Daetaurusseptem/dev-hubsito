@@ -14,9 +14,25 @@ const ICON_LIBRARY = {
 };
 const $ = (selector) => document.querySelector(selector);
 const IS_TAURI = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
+if (IS_TAURI) document.documentElement.classList.add('tauri-app');
 let API_ROOT = '/api';
 const projectsEl = $('#projects');
 const toastEl = $('#toast');
+
+async function initializeWindowChrome() {
+  if (!IS_TAURI || !window.__TAURI__?.window) return;
+  const appWindow = window.__TAURI__.window.getCurrentWindow();
+  const syncMaximized = async () => document.documentElement.classList.toggle('window-maximized', await appWindow.isMaximized());
+  $('#windowMinimize').addEventListener('click', () => appWindow.minimize());
+  $('#windowMaximize').addEventListener('click', async () => { await appWindow.toggleMaximize(); await syncMaximized(); });
+  $('#windowClose').addEventListener('click', () => appWindow.close());
+  $('#tauriTitlebar').addEventListener('dblclick', async event => {
+    if (event.target.closest('button')) return;
+    await appWindow.toggleMaximize(); await syncMaximized();
+  });
+  await appWindow.onResized(syncMaximized);
+  await syncMaximized();
+}
 
 function escapeHtml(value = '') { const el = document.createElement('div'); el.textContent = value; return el.innerHTML; }
 function initials(name) { return name.split(/\s+/).map(x => x[0]).join('').slice(0, 2).toUpperCase(); }
@@ -574,4 +590,5 @@ async function initialize() {
     toast('No se pudo conectar con DevHubsito');
   }
 }
+initializeWindowChrome();
 initialize();
