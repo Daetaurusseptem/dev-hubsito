@@ -186,7 +186,7 @@ async function openDirectory(folder = '', scope = state.browserScope) {
     if (folder) params.set('path', folder);
     if (scope === 'system') params.set('scope', 'system');
     const query = params.size ? `?${params}` : '';
-    const data = await api(`/filesystem${query}`);
+    const data = await api(`/filesystem${query}`, { signal: AbortSignal.timeout(6500) });
     state.browserPath = data.current;
     $('#selectFolderButton').disabled = !data.current;
     $('#folderBreadcrumbs').innerHTML = data.mode === 'roots'
@@ -201,7 +201,7 @@ async function openDirectory(folder = '', scope = state.browserScope) {
     state.browserPath = null;
     $('#selectFolderButton').disabled = true;
     list.innerHTML = '<div class="folder-empty">No se pudo abrir la carpeta.</div>';
-    $('#folderError').textContent = error.message;
+    $('#folderError').textContent = error.name === 'TimeoutError' ? 'Windows tardó demasiado en responder. Intenta otra ubicación.' : error.message;
   }
 }
 

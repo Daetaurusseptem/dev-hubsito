@@ -371,18 +371,34 @@ async function parseBody(request: Request): Promise<Record<string, unknown>> {
   try { return await request.json() as Record<string, unknown>; } catch { return {}; }
 }
 
-function systemDrives(): Array<{ name: string; path: string }> {
+async function systemDrives(): Promise<Array<{ name: string; path: string }>> {
   if (process.platform !== 'win32') return [{ name: '/', path: '/' }];
-  return Array.from({ length: 26 }, (_, index) => `${String.fromCharCode(65 + index)}:\\`)
-    .filter((drive) => existsSync(drive))
-    .map((drive) => ({ name: drive, path: drive }));
+  const systemDrive = process.env.SystemDrive || 'C:';
+  const fallback = new Set<string>([
+    /^[a-z]:$/i.test(systemDrive) ? `${systemDrive}\\` : path.parse(systemDrive).root,
+    ...ALLOWED_ROOTS.map((root) => path.parse(root).root),
+  ].filter(Boolean));
+  try {
+    const probe = Bun.spawn([
+      'powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+      'Get-PSDrive -PSProvider FileSystem | ForEach-Object { $_.Root }',
+    ], { stdout: 'pipe', stderr: 'ignore', windowsHide: true });
+    const output = await Promise.race([
+      new Response(probe.stdout).text(),
+      Bun.sleep(1500).then(() => { probe.kill(); return ''; }),
+    ]);
+    for (const drive of output.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)) {
+      if (/^[a-z]:\\$/i.test(drive)) fallback.add(drive);
+    }
+  } catch { /* The known system and configured roots remain available. */ }
+  return [...fallback].sort().map((drive) => ({ name: drive, path: drive }));
 }
 
 async function browseDirectories(inputPath: string | null, unrestricted = false) {
   if (!inputPath) {
     return {
       mode: 'roots', current: null, parent: null, breadcrumbs: [],
-      entries: unrestricted ? systemDrives() : ALLOWED_ROOTS.map((root) => ({ name: root, path: root })),
+      entries: unrestricted ? await systemDrives() : ALLOWED_ROOTS.map((root) => ({ name: root, path: root })),
     };
   }
 
