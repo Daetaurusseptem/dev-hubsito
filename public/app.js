@@ -1,4 +1,4 @@
-const state = { pin: localStorage.getItem('devHubPin') || '', projects: [], timer: null, discovery: null, browserPath: null, browserScope: 'allowed', settings: null, settingsDraft: null, editingProject: null, pendingProjectIcon: null, pendingIconMode: 'favicon', previewObjectUrl: null, waifuFrame: null, pendingWaifuSprite: null, waifuPreviewObjectUrl: null };
+const state = { pin: localStorage.getItem('devHubPin') || '', projects: [], timer: null, discovery: null, browserPath: null, browserScope: 'allowed', settings: null, settingsDraft: null, editingProject: null, pendingProjectIcon: null, pendingIconMode: 'favicon', previewObjectUrl: null, waifuFrame: null, pendingWaifuSprite: null, waifuPreviewObjectUrl: null, pendingActions: new Set() };
 const THEME_PRESETS = {
   aurora: { name: 'Aurora', accent: '#7c3aed', background: '#080b14', surface: '#111725', text: '#e8ecf7', radius: 20, density: 'comfortable', glass: 14, glow: 22, pattern: 'aurora' },
   midnight: { name: 'Midnight', accent: '#38bdf8', background: '#030712', surface: '#0b1220', text: '#e5f2ff', radius: 12, density: 'compact', glass: 8, glow: 12, pattern: 'grid' },
@@ -14,7 +14,7 @@ const ICON_LIBRARY = {
 };
 const $ = (selector) => document.querySelector(selector);
 const IS_TAURI = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
-const API_ROOT = IS_TAURI ? 'http://127.0.0.1:4173/api' : '/api';
+let API_ROOT = '/api';
 const projectsEl = $('#projects');
 const toastEl = $('#toast');
 
@@ -54,7 +54,7 @@ function applyTheme(settings) {
   document.body.dataset.density = settings.density; document.body.dataset.pattern = settings.pattern;
 }
 function spriteUrl(source = '') {
-  if (IS_TAURI && source.startsWith('/uploads/')) return `http://127.0.0.1:4173${source}`;
+  if (IS_TAURI && source.startsWith('/uploads/')) return `${new URL(API_ROOT, location.href).origin}${source}`;
   return source;
 }
 function frameCoordinates(frame, columns, rows) {
@@ -99,7 +99,16 @@ function api(path, options = {}) {
     .then(async response => { const body = await response.json().catch(() => ({})); if (!response.ok) throw Object.assign(new Error(body.message || 'Error'), { status: response.status }); return body; });
 }
 function toast(message) { toastEl.textContent = message; toastEl.classList.add('show'); setTimeout(() => toastEl.classList.remove('show'), 2400); }
-function setBusy(button, busy) { if (!button) return; button.disabled = busy; button.dataset.label ||= button.textContent; button.textContent = busy ? '…' : button.dataset.label; }
+function setBusy(button, busy, label = 'Procesando…') {
+  if (!button) return;
+  if (busy) {
+    button.dataset.label ||= button.innerHTML; button.disabled = true; button.classList.add('is-busy'); button.setAttribute('aria-busy', 'true');
+    button.innerHTML = `<span class="button-spinner" aria-hidden="true"></span>${escapeHtml(label)}`;
+  } else {
+    button.disabled = false; button.classList.remove('is-busy'); button.removeAttribute('aria-busy');
+    if (button.dataset.label) button.innerHTML = button.dataset.label;
+  }
+}
 
 function render() {
   const running = state.projects.flatMap(p => p.services).filter(s => s.running).length;
@@ -124,10 +133,20 @@ function render() {
 }
 
 async function load({ quiet = false } = {}) {
+  if (quiet && state.pendingActions.size) return;
   try { const data = await api('/projects'); state.projects = data.projects; state.settings = data.settings; applyTheme(state.settings); $('#networkLabel').textContent = `${data.host}:${new URL(API_ROOT, location.href).port || location.port || 4173}`; render(); }
   catch (error) { if (error.status === 401) { clearInterval(state.timer); $('#authDialog').showModal(); } else if (!quiet) toast(error.message); }
 }
-async function action(path, button) { setBusy(button, true); try { const result = await api(path, { method: 'POST' }); toast(result.message); await new Promise(r => setTimeout(r, 700)); await load(); } catch (error) { toast(error.message); } finally { setBusy(button, false); } }
+async function action(path, button, { wholeProject = false } = {}) {
+  if (state.pendingActions.has(path) || button.disabled) return;
+  state.pendingActions.add(path);
+  const operation = path.endsWith('/start') ? 'Iniciando' : path.endsWith('/stop') ? 'Deteniendo' : 'Reiniciando';
+  const card = button.closest('.project-card'); if (wholeProject) card?.classList.add('is-busy');
+  setBusy(button, true, `${operation}${wholeProject ? ' proyecto' : ''}…`);
+  try { const result = await api(path, { method: 'POST' }); toast(result.message); await new Promise(r => setTimeout(r, 700)); await load(); }
+  catch (error) { toast(error.message); }
+  finally { state.pendingActions.delete(path); card?.classList.remove('is-busy'); setBusy(button, false); }
+}
 
 function repositoryLabel(mode) { return mode === 'multi-repo' ? 'VARIOS REPOS' : mode === 'monorepo' ? 'MONOREPO' : 'REPO ÚNICO'; }
 function defaultArgs(pkg) { return [...pkg.hostArgs, ...(pkg.hostArgs.length ? ['--port', String(pkg.suggestedPort)] : [])].join(' '); }
@@ -320,7 +339,7 @@ document.addEventListener('click', async event => {
   else if (button.dataset.close === 'projectSettingsDialog') closeProjectSettings();
   else if (button.dataset.close) $(`#${button.dataset.close}`).close();
   if (button.dataset.serviceAction) action(`/services/${button.dataset.service}/${button.dataset.serviceAction}`, button);
-  if (button.dataset.projectAction) action(`/projects/${button.dataset.project}/${button.dataset.projectAction}`, button);
+  if (button.dataset.projectAction) action(`/projects/${button.dataset.project}/${button.dataset.projectAction}`, button, { wholeProject: true });
   if (button.dataset.logs) { const result = await api(`/services/${button.dataset.logs}/logs`); $('#logsTitle').textContent = button.dataset.name; $('#logsOutput').textContent = result.logs.join('\n') || 'Sin logs disponibles. Los procesos iniciados fuera del Hub no exponen su salida.'; $('#logsDialog').showModal(); }
   if (button.id === 'useFaviconButton' && state.editingProject) { state.pendingProjectIcon = null; state.pendingIconMode = 'favicon'; $('#projectIconFile').value = ''; setProjectIconPreview(projectImage({ ...state.editingProject, iconMode: 'favicon' }), state.editingProject); }
   if (button.id === 'resetWaifuButton' && state.settingsDraft?.waifu) {
@@ -450,6 +469,10 @@ document.querySelectorAll('dialog:not([data-static])').forEach(dialog => {
 });
 async function initialize() {
   try {
+    if (IS_TAURI) {
+      const port = await window.__TAURI__.core.invoke('get_api_port');
+      API_ROOT = `http://127.0.0.1:${port}/api`;
+    }
     const response = await fetch(`${API_ROOT}/bootstrap`); const bootstrap = await response.json();
     $('#networkLabel').textContent = `${bootstrap.host}:${bootstrap.port}`;
     if (bootstrap.onboardingRequired) { $('#onboardingDialog').showModal(); return; }

@@ -85,6 +85,7 @@ const UPLOADS_DIR = path.join(STORAGE_DIR, 'uploads');
 const PORT = Number(process.env.DEV_HUB_PORT || 4173);
 const HOST = process.env.DEV_HUB_HOST || '0.0.0.0';
 const BUN_BIN = process.env.BUN_BIN || (process.env.DEVHUBSITO_DESKTOP ? 'bun' : process.execPath);
+const SERVER_VERSION = process.env.DEVHUBSITO_SERVER_VERSION || 'dev';
 const DOCKER_BIN = process.env.DOCKER_BIN
   || 'C:\\Users\\jaime\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe';
 const DEFAULT_ALLOWED_ROOTS = (process.env.DEV_HUB_ALLOWED_ROOTS || WORKSPACE_ROOT)
@@ -586,6 +587,7 @@ async function api(request: Request, url: URL): Promise<Response> {
     const security = await loadSecurity();
     return json({
       name: 'DevHubsito', host: localIp(), port: PORT,
+      desktopMode: process.env.DEVHUBSITO_DESKTOP === '1', serverVersion: SERVER_VERSION,
       onboardingRequired: !security.onboardingComplete,
       pinRequired: security.onboardingComplete && security.pinRequired,
     });
