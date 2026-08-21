@@ -473,11 +473,29 @@ async function initialize() {
       const port = await window.__TAURI__.core.invoke('get_api_port');
       API_ROOT = `http://127.0.0.1:${port}/api`;
     }
-    const response = await fetch(`${API_ROOT}/bootstrap`); const bootstrap = await response.json();
+    let bootstrap;
+    for (let attempt = 0; attempt < (IS_TAURI ? 60 : 1); attempt += 1) {
+      try {
+        const response = await fetch(`${API_ROOT}/bootstrap`, { signal: AbortSignal.timeout(1_000) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        bootstrap = await response.json();
+        break;
+      } catch (error) {
+        if (!IS_TAURI || attempt === 59) throw error;
+        document.body.classList.add('backend-waiting');
+        $('#networkLabel').textContent = 'Iniciando motor local…';
+        await new Promise(resolve => setTimeout(resolve, 400));
+      }
+    }
+    document.body.classList.remove('backend-waiting');
     $('#networkLabel').textContent = `${bootstrap.host}:${bootstrap.port}`;
     if (bootstrap.onboardingRequired) { $('#onboardingDialog').showModal(); return; }
     if (bootstrap.pinRequired && !state.pin) { $('#authDialog').showModal(); return; }
     await load(); state.timer = setInterval(() => load({ quiet: true }), 4000);
-  } catch { toast('No se pudo conectar con DevHubsito'); }
+  } catch {
+    document.body.classList.remove('backend-waiting');
+    $('#networkLabel').textContent = 'Motor local no disponible';
+    toast('No se pudo conectar con DevHubsito');
+  }
 }
 initialize();
