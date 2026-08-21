@@ -6,3 +6,31 @@
 @media(max-width:1499px) and (min-width:761px){body.waifu-enabled .shell{width:calc(100% - 270px);margin-left:24px;margin-right:246px}.waifu-bubble{top:18px}}
 @media(max-width:1100px) and (min-width:761px){.waifu-rail{opacity:.88}.waifu-bubble{display:none}.waifu-character{filter:drop-shadow(0 15px 22px #0009)}}
 @media(max-width:760px){.waifu-rail{right:10px;bottom:12px;width:108px;height:108px;min-height:0;z-index:10}.waifu-character{right:0;bottom:0;width:108px;height:112px;border:1px solid #ffffff1d;border-radius:50%;background-color:color-mix(in srgb,var(--theme-surface,#111725) 90%,transparent);box-shadow:0 12px 35px #0009;backdrop-filter:blur(10px)}.waifu-bubble,.waifu-signature{display:none}.waifu-settings-layout{grid-template-columns:1fr}.waifu-settings-preview{min-height:210px}.onboarding-section{grid-template-columns:1fr}.onboarding-step{display:none}.onboarding-card{border-radius:20px 20px 12px 12px}.onboarding-card>h2{font-size:25px}}
+
+/* Ambient companion states */
+.waifu-bubble{opacity:0;visibility:hidden;transform:translateY(7px) scale(.985);transition:opacity .24s ease,transform .24s ease,visibility .24s}
+.waifu-rail.bubble-visible .waifu-bubble{opacity:1;visibility:visible;transform:translateY(0) scale(1)}
+.waifu-rail[data-state="focus"] .waifu-online{background:#38bdf8;box-shadow:0 0 0 5px #38bdf818}
+.waifu-rail[data-state="warning"] .waifu-online{background:#f59e0b;box-shadow:0 0 0 5px #f59e0b18}
+.waifu-rail[data-state="error"] .waifu-online{background:#fb7185;box-shadow:0 0 0 5px #fb718518}
+.waifu-rail[data-state="sleep"] .waifu-online{background:#64748b;box-shadow:0 0 0 5px #64748b18}
+.waifu-rail[data-profile="responsive"] .waifu-character{animation:waifu-breathe 5.4s ease-in-out infinite}
+.waifu-rail[data-profile="calm"] .waifu-character{animation:waifu-breathe 8s ease-in-out infinite}
+.waifu-rail[data-profile="silent"] .waifu-character{animation:none}
+.waifu-rail.frame-shift .waifu-character{animation:waifu-frame-in .32s ease-out}
+@keyframes waifu-breathe{0%,100%{translate:0 0}50%{translate:0 -3px}}
+@keyframes waifu-frame-in{0%{opacity:.45;filter:blur(2px) brightness(1.12)}100%{opacity:1;filter:none}}
+
+.waifu-rail[data-mode="compact"]{right:20px;bottom:18px;width:142px;height:142px;min-height:0;filter:drop-shadow(0 20px 28px #0008)}
+.waifu-rail[data-mode="compact"] .waifu-character{right:0;bottom:0;width:142px;height:147px;border:1px solid #ffffff1a;border-radius:28px;background-color:color-mix(in srgb,var(--theme-surface,#111725) 88%,transparent);box-shadow:inset 0 1px #ffffff10;backdrop-filter:blur(14px)}
+.waifu-rail[data-mode="compact"] .waifu-bubble{top:auto;right:0;bottom:156px;width:225px}
+.waifu-rail[data-mode="compact"] .waifu-signature{display:none}
+.waifu-state-editor{display:grid;gap:11px;padding:13px;border:1px solid #ffffff10;border-radius:14px;background:#080d1780}
+.waifu-state-editor>div:first-child{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.waifu-state-editor strong{font-size:12px}.waifu-state-editor small{color:#69758e;font-size:9px}
+.waifu-state-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.waifu-state-grid label{gap:5px;color:#7f8ba3;font-size:9px}.waifu-state-grid input{padding:8px 9px}
+.waifu-settings-fields .form-grid>label{display:grid;align-content:start;gap:7px}.waifu-settings-fields select{width:100%;padding:10px 12px;border:1px solid #ffffff16;border-radius:10px;background:#080d17;color:var(--theme-text,#e8ecf7)}
+@media(min-width:761px){body.waifu-compact .shell{width:min(1180px,calc(100% - 48px));margin-inline:auto}}
+@media(max-width:760px){.waifu-rail[data-mode="full"],.waifu-rail[data-mode="compact"]{right:10px;bottom:12px;width:108px;height:108px;min-height:0}.waifu-rail[data-mode="full"] .waifu-character,.waifu-rail[data-mode="compact"] .waifu-character{right:0;bottom:0;width:108px;height:112px;border-radius:50%}.waifu-state-grid{grid-template-columns:repeat(2,1fr)}}
+@media(prefers-reduced-motion:reduce){.waifu-character,.waifu-bubble{animation:none!important;transition:none!important}}

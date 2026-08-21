@@ -39,9 +39,9 @@ El engrane abre la configuración global. Aurora, Midnight, Matcha y Ember son p
 
 ## Side Waifu Module
 
-El onboarding también permite activar a Kira, la compañera visual del Hub. En escritorio ocupa un carril lateral y resume el estado de los servicios; en móvil se compacta como una burbuja flotante. Al pulsarla cambia de expresión.
+El onboarding también permite activar a Kira, la compañera visual del Hub. Funciona como presencia ambiental: adopta expresiones de reposo, foco, éxito, atención, error o descanso según lo que ocurre con los servicios. Sus mensajes aparecen sólo durante eventos relevantes y se retiran solos; al pulsarla muestra el resumen actual.
 
-Desde **Settings → Side Waifu Module** puedes ocultarla, cambiar su nombre y tamaño, volver al personaje incluido o subir un spritesheet PNG/WebP de hasta 12 MB. Indica las columnas y filas de su cuadrícula para que DevHubsito calcule cada frame; el spritesheet incluido usa `4 × 4`.
+Desde **Settings → Side Waifu Module** puedes elegir presencia completa, compacta u oculta y comportamiento reactivo, calmado o silencioso. También puedes cambiar nombre, tamaño y la celda que corresponde a cada estado, volver al personaje incluido o subir un spritesheet PNG/WebP de hasta 12 MB. Indica las columnas y filas de su cuadrícula para que DevHubsito calcule cada frame; el spritesheet incluido usa `4 × 4`.
 
 ## App de Windows
 

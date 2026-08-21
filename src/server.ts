@@ -54,12 +54,15 @@ type HubSettings = {
 };
 type WaifuSettings = {
   enabled: boolean;
+  mode: 'full' | 'compact' | 'hidden';
+  profile: 'responsive' | 'calm' | 'silent';
   name: string;
   sprite: string;
   columns: number;
   rows: number;
   frame: number;
   scale: number;
+  frames: Record<'idle' | 'focus' | 'success' | 'warning' | 'error' | 'sleep', number>;
 };
 type SecuritySettings = {
   onboardingComplete: boolean;
@@ -107,7 +110,7 @@ const managed = new Map<string, ManagedProcess>();
 const DEFAULT_SETTINGS: HubSettings = {
   preset: 'aurora', accent: '#7c3aed', background: '#080b14', surface: '#111725', text: '#e8ecf7',
   radius: 20, density: 'comfortable', glass: 14, glow: 22, pattern: 'aurora', projectIcons: {},
-  waifu: { enabled: true, name: 'Kira', sprite: '/waifu-default.png', columns: 4, rows: 4, frame: 2, scale: 100 },
+  waifu: { enabled: true, mode: 'full', profile: 'responsive', name: 'Kira', sprite: '/waifu-default.png', columns: 4, rows: 4, frame: 2, scale: 100, frames: { idle: 2, focus: 0, success: 1, warning: 6, error: 11, sleep: 12 } },
 };
 const DEFAULT_SECURITY: SecuritySettings = { onboardingComplete: false, pinRequired: false, pinSalt: '', pinHash: '' };
 
@@ -134,7 +137,7 @@ async function loadSettings(): Promise<HubSettings> {
       ...DEFAULT_SETTINGS,
       ...saved,
       projectIcons: { ...DEFAULT_SETTINGS.projectIcons, ...(saved.projectIcons || {}) },
-      waifu: { ...DEFAULT_SETTINGS.waifu, ...(saved.waifu || {}) },
+      waifu: { ...DEFAULT_SETTINGS.waifu, ...(saved.waifu || {}), frames: { ...DEFAULT_SETTINGS.waifu.frames, ...(saved.waifu?.frames || {}) } },
     };
   } catch { return structuredClone(DEFAULT_SETTINGS); }
 }
@@ -169,6 +172,7 @@ async function saveOnboarding(input: Record<string, unknown>): Promise<{ pinRequ
   await writeFile(SECURITY_PATH, `${JSON.stringify(security, null, 2)}\n`, 'utf8');
   const settings = await loadSettings();
   settings.waifu.enabled = input.waifuEnabled !== false;
+  settings.waifu.mode = settings.waifu.enabled ? 'full' : 'hidden';
   await writeFile(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
   return { pinRequired, settings };
 }
@@ -192,6 +196,12 @@ async function saveSettings(input: Record<string, unknown>): Promise<HubSettings
   const spriteCandidate = String(rawWaifu.sprite || current.waifu.sprite);
   const sprite = spriteCandidate === '/waifu-default.png' || /^\/uploads\/[a-z0-9._-]+$/i.test(spriteCandidate)
     ? spriteCandidate : current.waifu.sprite;
+  const mode = ['full', 'compact', 'hidden'].includes(String(rawWaifu.mode))
+    ? rawWaifu.mode as WaifuSettings['mode'] : (rawWaifu.enabled === false ? 'hidden' : current.waifu.mode);
+  const profile = ['responsive', 'calm', 'silent'].includes(String(rawWaifu.profile))
+    ? rawWaifu.profile as WaifuSettings['profile'] : current.waifu.profile;
+  const rawFrames = rawWaifu.frames && typeof rawWaifu.frames === 'object' ? rawWaifu.frames as Record<string, unknown> : {};
+  const frameFor = (key: keyof WaifuSettings['frames']) => Math.min(columns * rows - 1, Math.max(0, Number(rawFrames[key] ?? current.waifu.frames[key]) || 0));
   const settings: HubSettings = {
     preset: String(input.preset || current.preset).slice(0, 30),
     accent: validColor(input.accent, current.accent), background: validColor(input.background, current.background),
@@ -200,13 +210,14 @@ async function saveSettings(input: Record<string, unknown>): Promise<HubSettings
     glass: Math.min(30, Math.max(0, Number(input.glass) || 0)),
     glow: Math.min(100, Math.max(0, Number(input.glow) || 0)), pattern, projectIcons: icons,
     waifu: {
-      enabled: rawWaifu.enabled === undefined ? current.waifu.enabled : rawWaifu.enabled === true,
+      enabled: mode !== 'hidden', mode, profile,
       name: String(rawWaifu.name || current.waifu.name).trim().slice(0, 30) || 'Waifu',
       sprite,
       columns,
       rows,
       frame: Math.min(columns * rows - 1, Math.max(0, Number(rawWaifu.frame) || 0)),
       scale: Math.min(140, Math.max(70, Number(rawWaifu.scale) || current.waifu.scale)),
+      frames: { idle: frameFor('idle'), focus: frameFor('focus'), success: frameFor('success'), warning: frameFor('warning'), error: frameFor('error'), sleep: frameFor('sleep') },
     },
   };
   await writeFile(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
