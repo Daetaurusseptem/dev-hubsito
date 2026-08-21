@@ -1,4 +1,4 @@
-const state = { pin: localStorage.getItem('devHubPin') || '', projects: [], timer: null, discovery: null, browserPath: null, browserScope: 'allowed', settings: null, settingsDraft: null, editingProject: null, pendingProjectIcon: null, pendingIconMode: 'favicon', previewObjectUrl: null, waifuFrame: null, pendingWaifuSprite: null, waifuPreviewObjectUrl: null, pendingActions: new Set(), waifuNotice: null, waifuNoticeTimer: null, waifuSnapshot: null };
+const state = { pin: localStorage.getItem('devHubPin') || '', projects: [], timer: null, discovery: null, browserPath: null, browserScope: 'allowed', settings: null, settingsDraft: null, editingProject: null, projectServiceOptions: null, pendingProjectIcon: null, pendingIconMode: 'favicon', previewObjectUrl: null, waifuFrame: null, pendingWaifuSprite: null, waifuPreviewObjectUrl: null, pendingActions: new Set(), waifuNotice: null, waifuNoticeTimer: null, waifuSnapshot: null };
 const THEME_PRESETS = {
   aurora: { name: 'Aurora', accent: '#7c3aed', background: '#080b14', surface: '#111725', text: '#e8ecf7', radius: 20, density: 'comfortable', glass: 14, glow: 22, pattern: 'aurora' },
   midnight: { name: 'Midnight', accent: '#38bdf8', background: '#030712', surface: '#0b1220', text: '#e5f2ff', radius: 12, density: 'compact', glass: 8, glow: 12, pattern: 'grid' },
@@ -334,7 +334,26 @@ function setProjectIconPreview(source, project) {
   preview.querySelector('img')?.addEventListener('error', event => event.currentTarget.remove());
 }
 
-function openProjectSettings(projectId) {
+function updateProjectServiceCommand(row) {
+  const select = row.querySelector('.project-service-script'); if (!select) return;
+  const option = select.selectedOptions[0]; const watch = option?.dataset.watch === 'true';
+  const badge = row.querySelector('.watch-badge'); badge.textContent = watch ? 'WATCH' : 'REINICIO MANUAL'; badge.classList.toggle('off', !watch);
+  row.querySelector('code').textContent = `bun run ${select.value}${row.dataset.args ? ` ${row.dataset.args}` : ''}`;
+}
+
+function renderProjectServiceCommands(services) {
+  const container = $('#projectServiceCommands'); state.projectServiceOptions = services;
+  if (!services.length) { container.innerHTML = '<div class="service-config-loading">Este proyecto no tiene servicios configurables.</div>'; return; }
+  container.innerHTML = services.map(service => {
+    if (!service.editable) return `<article class="project-service-command"><div><strong>${escapeHtml(service.name)}</strong><small>${service.kind === 'docker-compose' ? 'Gestionado desde compose.yaml' : escapeHtml(service.error || 'Sin scripts ejecutables')}</small></div><div class="project-service-control"><code>Configuración externa</code></div></article>`;
+    const currentExists = service.options.some(option => option.script === service.currentScript);
+    const options = `${currentExists ? '' : `<option value="${escapeHtml(service.currentScript)}" selected disabled>${escapeHtml(service.currentScript || 'Script no disponible')}</option>`}${service.options.map(option => `<option value="${escapeHtml(option.script)}" data-watch="${option.watch}" ${option.script === service.currentScript ? 'selected' : ''}>bun run ${escapeHtml(option.script)}${option.watch ? ' · watch' : ''}</option>`).join('')}`;
+    const current = service.options.find(option => option.script === service.currentScript); const watch = current?.watch === true;
+    return `<article class="project-service-command" data-service-config="${escapeHtml(service.id)}" data-args="${escapeHtml((service.args || []).join(' '))}"><div><strong>${escapeHtml(service.name)}</strong><small>:${service.port || ''} · comando predeterminado</small><div class="runtime-badges"><span class="watch-badge ${watch ? '' : 'off'}">${watch ? 'WATCH' : 'REINICIO MANUAL'}</span></div>${service.running ? '<small class="runtime-note">Detén el servicio para cambiarlo.</small>' : ''}</div><div class="project-service-control"><select class="project-service-script" ${service.running ? 'disabled' : ''}>${options}</select><code>bun run ${escapeHtml(service.currentScript)}${service.args?.length ? ` ${escapeHtml(service.args.join(' '))}` : ''}</code></div></article>`;
+  }).join('');
+}
+
+async function openProjectSettings(projectId) {
   const project = state.projects.find(item => item.id === projectId); if (!project) return;
   if (state.previewObjectUrl) URL.revokeObjectURL(state.previewObjectUrl);
   state.editingProject = project; state.pendingProjectIcon = null; state.previewObjectUrl = null;
@@ -342,12 +361,19 @@ function openProjectSettings(projectId) {
   $('#projectSettingsTitle').textContent = project.name; $('#projectSettingsName').value = project.name;
   $('#projectSettingsDescription').value = project.description || ''; $('#projectSettingsColor').value = project.color || '#2563eb';
   $('#projectIconFile').value = ''; $('#projectSettingsError').textContent = '';
+  state.projectServiceOptions = null; $('#projectServiceCommands').innerHTML = '<div class="service-config-loading">Leyendo scripts disponibles…</div>';
   setProjectIconPreview(projectImage(project), project); $('#projectSettingsDialog').showModal();
+  try {
+    const result = await api(`/projects/${project.id}/service-options`);
+    if (state.editingProject?.id === project.id) renderProjectServiceCommands(result.services);
+  } catch (error) {
+    if (state.editingProject?.id === project.id) $('#projectServiceCommands').innerHTML = `<div class="service-config-loading runtime-error">${escapeHtml(error.message)}</div>`;
+  }
 }
 
 function closeProjectSettings() {
   if (state.previewObjectUrl) URL.revokeObjectURL(state.previewObjectUrl);
-  state.previewObjectUrl = null; state.editingProject = null; state.pendingProjectIcon = null;
+  state.previewObjectUrl = null; state.editingProject = null; state.projectServiceOptions = null; state.pendingProjectIcon = null;
   $('#projectSettingsDialog').close();
 }
 
@@ -447,6 +473,10 @@ $('#projectIconFile').addEventListener('change', event => {
   $('#projectSettingsError').textContent = ''; setProjectIconPreview(state.previewObjectUrl, state.editingProject);
 });
 
+$('#projectServiceCommands').addEventListener('change', event => {
+  const row = event.target.closest('[data-service-config]'); if (row) updateProjectServiceCommand(row);
+});
+
 $('#projectSettingsForm').addEventListener('submit', async event => {
   event.preventDefault(); if (!state.editingProject) return;
   const submit = event.currentTarget.querySelector('button[type="submit"]'); setBusy(submit, true); $('#projectSettingsError').textContent = '';
@@ -458,6 +488,7 @@ $('#projectSettingsForm').addEventListener('submit', async event => {
     await api(`/projects/${state.editingProject.id}`, { method: 'PATCH', body: JSON.stringify({
       name: $('#projectSettingsName').value, description: $('#projectSettingsDescription').value,
       color: $('#projectSettingsColor').value, iconMode: state.pendingIconMode,
+      serviceScripts: Object.fromEntries([...$('#projectServiceCommands').querySelectorAll('[data-service-config]')].map(row => [row.dataset.serviceConfig, row.querySelector('.project-service-script').value])),
     }) });
     closeProjectSettings(); await load(); toast('Proyecto actualizado');
   } catch (error) { $('#projectSettingsError').textContent = error.message; }

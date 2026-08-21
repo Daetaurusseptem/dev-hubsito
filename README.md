@@ -27,7 +27,7 @@ No ofrece scripts de migración, seed, reset, test, build o deploy como procesos
 
 ## Cards y servicios
 
-El icono grande intenta usar el favicon del servicio web. En `•••` puedes subir una imagen propia, cambiar el nombre, descripción o color de la card y quitar el registro del Hub. Quitar un proyecto nunca borra sus archivos.
+El icono grande intenta usar el favicon del servicio web. En `•••` puedes subir una imagen propia, cambiar el nombre, descripción o color de la card y elegir el comando predeterminado de cada servicio entre los scripts ejecutables de su `package.json`. El Hub muestra si la opción usa watch; para cambiarla, el servicio debe estar detenido. Desde el mismo modal también puedes quitar el registro del Hub. Quitar un proyecto nunca borra sus archivos.
 
 Cada servicio lleva su propia tecnología: Angular, Express, PostgreSQL, React, Vue, Bun, Docker, etc. El punto de estado significa:
 

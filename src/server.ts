@@ -475,6 +475,24 @@ async function addAllowedRoot(input: Record<string, unknown>) {
   return { message: 'Ubicación agregada', root, allowedRoots: ALLOWED_ROOTS };
 }
 
+async function projectServiceOptions(project: ProjectConfig) {
+  return Promise.all(project.services.map(async (service) => {
+    const running = await isPortOpen(service.port);
+    const args = service.command?.[0] === '$BUN' && service.command?.[1] === 'run' ? service.command.slice(3) : [];
+    if (service.kind !== 'process') {
+      return { id: service.id, name: service.name, kind: service.kind, port: service.port, editable: false, running, currentScript: '', args, options: [] };
+    }
+    try {
+      const packageJson = JSON.parse(await readFile(path.join(serviceCwd(service), 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
+      const scripts = packageJson.scripts || {};
+      const options = runtimeScriptNames(scripts).map((script) => ({ script, watch: isWatchScript(script, scripts[script]) }));
+      return { id: service.id, name: service.name, kind: service.kind, port: service.port, editable: options.length > 0, running, currentScript: service.script || '', args, options };
+    } catch {
+      return { id: service.id, name: service.name, kind: service.kind, port: service.port, editable: false, running, currentScript: service.script || '', args, options: [], error: 'No se pudo leer package.json' };
+    }
+  }));
+}
+
 async function updateProject(project: ProjectConfig, input: Record<string, unknown>): Promise<ProjectConfig> {
   const name = String(input.name || project.name).trim();
   if (name.length < 2 || name.length > 80) throw Object.assign(new Error('El nombre debe tener entre 2 y 80 caracteres'), { status: 400 });
@@ -482,6 +500,28 @@ async function updateProject(project: ProjectConfig, input: Record<string, unkno
   project.description = String(input.description ?? project.description ?? '').trim().slice(0, 180);
   project.color = validColor(input.color, project.color || '#2563eb');
   if (input.iconMode === 'favicon' || input.iconMode === 'custom') project.iconMode = input.iconMode;
+  const requestedScripts = input.serviceScripts && typeof input.serviceScripts === 'object'
+    ? input.serviceScripts as Record<string, unknown> : {};
+  const scriptUpdates: Array<{ service: ServiceConfig; script: string; watch: boolean }> = [];
+  for (const [serviceId, requestedScript] of Object.entries(requestedScripts)) {
+    const service = project.services.find((item) => item.id === serviceId);
+    if (!service || service.kind !== 'process') throw Object.assign(new Error('Servicio no válido'), { status: 400 });
+    const script = String(requestedScript || '');
+    if (script === service.script) continue;
+    if (await isPortOpen(service.port)) throw Object.assign(new Error(`Detén ${service.name} antes de cambiar su comando`), { status: 409 });
+    const packageJson = JSON.parse(await readFile(path.join(serviceCwd(service), 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
+    const scripts = packageJson.scripts || {};
+    if (!isValidScriptName(script) || !scripts[script] || !runtimeScriptNames(scripts).includes(script)) {
+      throw Object.assign(new Error(`El script ${script} ya no está disponible para ${service.name}`), { status: 400 });
+    }
+    scriptUpdates.push({ service, script, watch: isWatchScript(script, scripts[script]) });
+  }
+  for (const update of scriptUpdates) {
+    const args = update.service.command?.[0] === '$BUN' && update.service.command?.[1] === 'run' ? update.service.command.slice(3) : [];
+    update.service.script = update.script;
+    update.service.watch = update.watch;
+    update.service.command = ['$BUN', 'run', update.script, ...args];
+  }
   const config = await loadConfig();
   config.projects = config.projects.map((item) => item.id === project.id ? project : item);
   await saveConfig(config);
@@ -633,6 +673,13 @@ async function api(request: Request, url: URL): Promise<Response> {
   }
   if (url.pathname === '/api/waifu/sprite' && request.method === 'POST') {
     return json(await uploadWaifuSprite(request));
+  }
+
+  const serviceOptionsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/service-options$/);
+  if (serviceOptionsMatch && request.method === 'GET') {
+    const project = config.projects.find((item) => item.id === decodeURIComponent(serviceOptionsMatch[1]));
+    if (!project) return json({ message: 'Proyecto no encontrado' }, { status: 404 });
+    return json({ services: await projectServiceOptions(project) });
   }
   if (url.pathname === '/api/projects' && request.method === 'POST') {
     return json(await addProject(await parseBody(request)), { status: 201 });
