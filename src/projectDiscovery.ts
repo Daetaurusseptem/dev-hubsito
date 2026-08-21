@@ -15,7 +15,9 @@ export type DiscoveredPackage = FrameworkDetection & {
   folder: string;
   relativePath: string;
   scripts: string[];
+  watchScripts: string[];
   suggestedScript: string;
+  watchEnabled: boolean;
   suggestedPort: number;
 };
 
@@ -52,14 +54,22 @@ export function detectFramework(packageJson: PackageJson, files: Set<string> = n
 
 export function chooseScript(scripts: Record<string, string> = {}): string {
   const runnable = runtimeScriptNames(scripts);
-  return ['dev', 'start', 'serve', 'start:dev', 'preview'].find((name) => runnable.includes(name))
-    || runnable[0]
-    || '';
+  const nameScore = (name: string) => name === 'dev' ? 45 : name === 'start:dev' ? 42 : /(^|:)watch(:|$)/i.test(name) ? 40 : name === 'serve' ? 32 : name === 'start' ? 22 : name === 'preview' ? 10 : 16;
+  return runnable.sort((left, right) => {
+    const rightScore = (isWatchScript(right, scripts[right]) ? 100 : 0) + nameScore(right);
+    const leftScore = (isWatchScript(left, scripts[left]) ? 100 : 0) + nameScore(left);
+    return rightScore - leftScore;
+  })[0] || '';
+}
+
+export function isWatchScript(name: string, command = ''): boolean {
+  if (/(^|:)(watch|hot)(:|$)/i.test(name)) return true;
+  return /(\bng\s+serve\b|\bvite(?:\s|$)|\bnext\s+dev\b|\bnuxt\s+dev\b|\bastro\s+dev\b|\bsvelte-kit\s+dev\b|\bwebpack(?:-dev-server|\s+serve)\b|\breact-scripts\s+start\b|\bnest\s+start\b[^\r\n]*--watch\b|\bnodemon\b|\bts-node-dev\b|\btsx\s+watch\b|\bnode\s+--watch\b|\bbun\s+(?:run\s+)?--watch\b)/i.test(command);
 }
 
 export function runtimeScriptNames(scripts: Record<string, string> = {}): string[] {
-  const unsafeName = /(^db:|test|build|lint|format|reset|migrat|seed|deploy|publish|delete|remove|clean|generate|typecheck|init)/i;
-  const serverCommand = /(\bng\s+serve\b|\bvite\b|\bnext\s+dev\b|\bnuxt\s+dev\b|\bastro\s+dev\b|\bnest\s+start\b|\bnodemon\b|\btsx\b|\bts-node\b|\bbun\s+(--watch\s+)?[^\s]+\.(ts|js)\b|\bnode\s+[^\s]+\.js\b)/i;
+  const unsafeName = /(^db:|^desktop:|test|build|lint|format|reset|migrat|seed|deploy|publish|delete|remove|clean|generate|typecheck|init|prepare|doctor)/i;
+  const serverCommand = /(\bng\s+serve\b|\bvite\b|\bnext\s+dev\b|\bnuxt\s+dev\b|\bastro\s+dev\b|\bsvelte-kit\s+dev\b|\bwebpack(?:-dev-server|\s+serve)\b|\breact-scripts\s+start\b|\bnest\s+start\b|\bnodemon\b|\btsx\b|\bts-node(?:-dev)?\b|\bbun\s+(?:(?:run\s+)?--watch\s+)?[^\s]+\.(ts|js)\b|\bnode\s+(?:--watch\s+)?[^\s]+\.js\b)/i;
   return Object.entries(scripts)
     .filter(([name, command]) => !unsafeName.test(name) && (
       ['dev', 'start', 'serve', 'start:dev', 'preview'].includes(name)
@@ -136,7 +146,9 @@ export async function discoverProject(
       folder,
       relativePath: path.relative(root, folder) || '.',
       scripts: runnableScripts,
+      watchScripts: runnableScripts.filter((script) => isWatchScript(script, packageJson.scripts?.[script])),
       suggestedScript,
+      watchEnabled: isWatchScript(suggestedScript, packageJson.scripts?.[suggestedScript]),
       suggestedPort: await nextFreePort(preferredPort, reservedPorts, isOpen),
     });
   }

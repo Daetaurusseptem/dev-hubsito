@@ -162,7 +162,7 @@ function render() {
       <header class="project-header"><div class="project-title"><span class="project-icon"><span>${initials(project.name)}</span>${image ? `<img data-project-image src="${escapeHtml(image)}" alt="">` : ''}</span><div><h3>${escapeHtml(project.name)}</h3><p>${escapeHtml(project.description || 'Proyecto local')}</p></div></div>
       <div class="project-actions"><button class="ghost" data-project-action="${allRunning ? 'stop' : 'start'}" data-project="${project.id}">${allRunning ? '■ Detener' : '▶ Iniciar'} todo</button><button class="ghost" data-project-settings="${project.id}" title="Configurar proyecto">•••</button></div></header>
       <div class="services">${project.services.map(service => `
-        <div class="service"><div class="service-head"><div><div class="service-meta"><i class="dot ${service.ownership === 'managed' ? 'online' : service.ownership === 'external' ? 'external' : 'offline'}"></i>${technologyMarkup(service)}<strong>${escapeHtml(service.name)}</strong><span class="status-pill ${service.ownership}">${statusLabel(service)}</span></div><span class="port">${escapeHtml(service.framework || service.kind)} · :${service.port}${service.ownership === 'external' ? ' · fuera del Hub' : ''}</span></div>
+        <div class="service"><div class="service-head"><div><div class="service-meta"><i class="dot ${service.ownership === 'managed' ? 'online' : service.ownership === 'external' ? 'external' : 'offline'}"></i>${technologyMarkup(service)}<strong>${escapeHtml(service.name)}</strong><span class="status-pill ${service.ownership}">${statusLabel(service)}</span>${service.watch ? '<span class="watch-pill">WATCH</span>' : ''}</div><span class="port">${escapeHtml(service.framework || service.kind)} · :${service.port}${service.watch ? ' · recarga automática' : ' · reinicio manual'}${service.ownership === 'external' ? ' · fuera del Hub' : ''}</span></div>
         <div class="service-actions">${service.url && service.running ? `<a class="open-link" href="${service.url}" target="_blank" rel="noreferrer">Abrir ↗</a>` : ''}
         ${service.ownership === 'managed' ? `<button class="service-button" data-logs="${service.id}" data-name="${escapeHtml(service.name)}">Logs</button><button class="service-button stop" data-service-action="stop" data-service="${service.id}">Detener</button><button class="service-button" data-service-action="restart" data-service="${service.id}">Reiniciar</button>` : service.ownership === 'external' && service.kind === 'docker-compose' ? `<button class="service-button stop" data-service-action="stop" data-service="${service.id}">Detener</button><button class="service-button" data-service-action="restart" data-service="${service.id}">Reiniciar</button>` : service.ownership === 'external' ? `<button class="service-button" disabled title="Iniciado fuera del Hub">No administrado</button>` : `<button class="service-button start" data-service-action="start" data-service="${service.id}">Iniciar</button>`}</div></div></div>`).join('')}</div>
     </article>`;
@@ -200,10 +200,10 @@ function renderDiscovery(discovery) {
   $('#projectName').value = discovery.name;
   $('#detectedServices').innerHTML = discovery.packages.map((pkg, index) => `
     <article class="detected-service" data-index="${index}" data-relative="${escapeHtml(pkg.relativePath)}" data-framework="${escapeHtml(pkg.framework)}" data-kind="${escapeHtml(pkg.kind)}">
-      <header><label class="service-toggle"><input class="include-service" type="checkbox" checked><span></span></label><div><strong>${escapeHtml(pkg.name)}</strong><small>${escapeHtml(pkg.relativePath)}</small></div><span class="framework-badge">${escapeHtml(pkg.framework)}</span></header>
+      <header><label class="service-toggle"><input class="include-service" type="checkbox" checked><span></span></label><div><strong>${escapeHtml(pkg.name)}</strong><small>${escapeHtml(pkg.relativePath)}</small></div><div class="detected-badges"><span class="framework-badge">${escapeHtml(pkg.framework)}</span><span class="watch-badge ${pkg.watchEnabled ? '' : 'off'}">${pkg.watchEnabled ? 'WATCH' : 'REINICIO MANUAL'}</span></div></header>
       <div class="service-config-grid">
         <label>Nombre<input class="detected-name" value="${escapeHtml(pkg.kind === 'frontend' ? 'Web' : pkg.kind === 'backend' ? 'API' : pkg.name)}" required></label>
-        <label>Comando<select class="detected-script">${pkg.scripts.map(script => `<option value="${escapeHtml(script)}" ${script === pkg.suggestedScript ? 'selected' : ''}>bun run ${escapeHtml(script)}</option>`).join('')}</select></label>
+        <label>Comando<select class="detected-script">${pkg.scripts.map(script => `<option value="${escapeHtml(script)}" data-watch="${(pkg.watchScripts || []).includes(script)}" ${script === pkg.suggestedScript ? 'selected' : ''}>bun run ${escapeHtml(script)}${(pkg.watchScripts || []).includes(script) ? ' · watch' : ''}</option>`).join('')}</select></label>
         <label>Puerto<input class="detected-port" type="number" min="1024" max="65535" value="${pkg.suggestedPort}" required></label>
         <label>Acceso<span class="inline-check"><input class="detected-openable" type="checkbox" checked> Mostrar botón Abrir</span></label>
         <label class="wide-field">Argumentos<input class="detected-args" value="${escapeHtml(defaultArgs(pkg))}" placeholder="--host 0.0.0.0 --port ${pkg.suggestedPort}"></label>
@@ -214,11 +214,13 @@ function renderDiscovery(discovery) {
 
 function updateCommandPreview(card) {
   const script = card.querySelector('.detected-script').value;
+  const watch = card.querySelector('.detected-script').selectedOptions[0]?.dataset.watch === 'true';
   const argsInput = card.querySelector('.detected-args');
   const selectedPort = card.querySelector('.detected-port').value;
   if (/--port\s+\d+/.test(argsInput.value)) argsInput.value = argsInput.value.replace(/--port\s+\d+/, `--port ${selectedPort}`);
   const args = argsInput.value;
   card.querySelector('.command-preview').textContent = `bun run ${script}${args ? ` ${args}` : ''}`;
+  const watchBadge = card.querySelector('.watch-badge'); watchBadge.textContent = watch ? 'WATCH' : 'REINICIO MANUAL'; watchBadge.classList.toggle('off', !watch);
   card.classList.toggle('excluded', !card.querySelector('.include-service').checked);
 }
 
@@ -493,6 +495,7 @@ $('#addForm').addEventListener('submit', async event => {
       kind: card.dataset.kind,
       name: card.querySelector('.detected-name').value,
       script: card.querySelector('.detected-script').value,
+      watch: card.querySelector('.detected-script').selectedOptions[0]?.dataset.watch === 'true',
       port: Number(card.querySelector('.detected-port').value),
       openable: card.querySelector('.detected-openable').checked,
       args: card.querySelector('.detected-args').value.match(/(?:[^\s"]+|"[^"]*")+/g)?.map(x => x.replace(/^"|"$/g, '')) || [],

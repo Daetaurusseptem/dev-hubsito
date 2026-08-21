@@ -1,0 +1,40 @@
+.detected-badges {
+  display: flex !important;
+  align-items: flex-end !important;
+  gap: 5px;
+}
+
+.watch-badge,
+.watch-pill {
+  width: max-content;
+  padding: 4px 7px;
+  border: 1px solid #34d39925;
+  border-radius: 7px;
+  background: #34d39913;
+  color: #6ee7b7;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.watch-badge.off {
+  border-color: #64748b20;
+  background: #64748b10;
+  color: #78849a;
+}
+
+.watch-pill {
+  padding: 3px 6px;
+  font-size: 7px;
+}
+
+@media (max-width: 760px) {
+  .detected-badges {
+    grid-column: 2;
+    align-items: flex-start !important;
+  }
+
+  .framework-badge {
+    grid-column: auto;
+  }
+}

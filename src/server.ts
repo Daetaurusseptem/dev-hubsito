@@ -11,7 +11,7 @@ import {
   resolveAllowedPath,
   slugify,
 } from './projectPolicy';
-import { discoverProject, runtimeScriptNames } from './projectDiscovery';
+import { discoverProject, isWatchScript, runtimeScriptNames } from './projectDiscovery';
 
 type ServiceKind = 'process' | 'docker-compose';
 type ServiceConfig = {
@@ -26,6 +26,7 @@ type ServiceConfig = {
   openable?: boolean;
   framework?: string;
   script?: string;
+  watch?: boolean;
   env?: Record<string, string>;
 };
 type ProjectConfig = {
@@ -282,6 +283,15 @@ function serviceCwd(service: ServiceConfig): string {
   return resolved;
 }
 
+async function serviceUsesWatch(service: ServiceConfig): Promise<boolean> {
+  if (typeof service.watch === 'boolean') return service.watch;
+  if (service.kind !== 'process' || !service.script) return false;
+  try {
+    const packageJson = JSON.parse(await readFile(path.join(serviceCwd(service), 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
+    return isWatchScript(service.script, packageJson.scripts?.[service.script]);
+  } catch { return false; }
+}
+
 function commandFor(service: ServiceConfig, action: 'start' | 'stop'): string[] {
   if (service.kind === 'docker-compose') {
     return [
@@ -318,7 +328,7 @@ async function startService(service: ServiceConfig): Promise<{ message: string }
     if (exitCode !== 0) throw new Error(entry.logs.slice(-8).join('\n') || 'Docker Compose no pudo iniciar');
     managed.delete(service.id);
   }
-  return { message: 'Servicio iniciado' };
+  return { message: await serviceUsesWatch(service) ? 'Servicio iniciado con watch' : 'Servicio iniciado' };
 }
 
 async function stopTree(pid: number): Promise<void> {
@@ -361,6 +371,7 @@ async function serviceView(service: ServiceConfig) {
   const host = localIp();
   return {
     ...service,
+    watch: await serviceUsesWatch(service),
     running,
     ownership,
     url: service.openable === false ? null : `http://${host}:${service.port}${service.path || '/'}`,
@@ -574,6 +585,7 @@ async function addProject(input: Record<string, unknown>): Promise<ProjectConfig
       cwd,
       command: ['$BUN', 'run', String(script), ...normalizeArgs(raw.args)],
       script: String(script),
+      watch: isWatchScript(String(script), packageJson.scripts[script]),
       framework: String(raw.framework || 'Node/Bun').slice(0, 50),
       env: { PORT: String(port), HOST: '0.0.0.0' },
       port,

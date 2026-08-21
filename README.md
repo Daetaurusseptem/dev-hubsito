@@ -21,6 +21,8 @@ Pulsa **Agregar → Explorar**. Puedes entrar a una ubicación conocida o usar *
 
 DevHubsito distingue un repo normal, un monorepo y una carpeta con varios repos. Lee los `package.json`, reconoce el framework y propone comando y puerto. Antes de guardar puedes corregir cualquiera de los dos.
 
+Cuando existen varias opciones, prioriza comandos con recarga automática (`--watch`, `nodemon`, `tsx watch`, `ng serve`, Vite, Next/Nuxt/Astro dev, etc.). El selector indica **WATCH** o **REINICIO MANUAL** y las cards conservan esa señal para saber si los cambios de código se aplican sin reiniciar el servicio.
+
 No ofrece scripts de migración, seed, reset, test, build o deploy como procesos de desarrollo. Los comandos se ejecutan sin pasar por un shell.
 
 ## Cards y servicios
