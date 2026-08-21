@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DevHubsito",
+  "version": "0.1.0",
+  "identifier": "com.daetaurus.devhubsito",
+  "build": {
+    "beforeDevCommand": "bun run start",
+    "devUrl": "http://localhost:4173",
+    "beforeBuildCommand": "bun run desktop:prepare",
+    "frontendDist": "../public"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "DevHubsito — by Daetaurus Jaime",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 380,
+        "minHeight": 620,
+        "center": true,
+        "resizable": true
+      }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "Daetaurus Jaime",
+    "copyright": "Copyright © 2026 Daetaurus Jaime",
+    "category": "DeveloperTool",
+    "shortDescription": "Tus proyectos locales en un solo hubsito.",
+    "longDescription": "DevHubsito detecta, levanta y organiza proyectos locales desde Windows y la red móvil.",
+    "externalBin": ["binaries/devhubsito-server"],
+    "resources": { "../public/": "public/" },
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"]
+  }
+}
+

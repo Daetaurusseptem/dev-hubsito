@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <title>DevHubsito — by Daetaurus Jaime</title>
+  <link rel="icon" href="/devhubsito.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/discovery.css">
+  <link rel="stylesheet" href="/folder-browser.css">
+  <link rel="stylesheet" href="/theme-maker.css">
+  <link rel="stylesheet" href="/project-settings.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark"><img src="/devhubsito.svg" alt=""></span><div><strong>DevHubsito</strong><small><span id="networkLabel">Entorno local</span> · by Daetaurus Jaime</small></div></div>
+      <div class="top-actions"><button class="ghost icon-button" id="settingsButton" aria-label="Personalizar">⚙</button><button class="ghost icon-button" id="refreshButton" aria-label="Actualizar">↻</button><button class="primary" id="addButton">+ Agregar</button></div>
+    </header>
+
+    <section class="hero">
+      <div><span class="eyebrow">TU TALLER LOCAL</span><h1>Todos tus proyectos,<br><em>en un solo hubsito.</em></h1><p>Arranca servicios, revisa puertos y abre cualquier app desde tu computadora o celular.</p></div>
+      <div class="summary-card"><span class="pulse"></span><div><strong id="runningCount">0 servicios activos</strong><small id="projectCount">0 proyectos registrados</small></div></div>
+    </section>
+
+    <section class="section-head"><div><h2>Proyectos</h2><p>Estado en tiempo real de tu entorno</p></div><div class="legend"><span><i class="dot online"></i>Activo</span><span><i class="dot external"></i>Externo</span><span><i class="dot offline"></i>Detenido</span></div></section>
+    <section id="projects" class="project-grid" aria-live="polite"></section>
+  </main>
+
+  <dialog id="authDialog" class="modal" data-static>
+    <form id="authForm" class="modal-card narrow">
+      <span class="modal-icon">⌘</span><h2>Conecta con tu Dev Hub</h2><p>Ingresa el PIN local para administrar procesos desde este dispositivo.</p>
+      <label>PIN<input id="pinInput" type="password" autocomplete="current-password" placeholder="••••••" required></label>
+      <p class="form-error" id="authError"></p><button class="primary wide" type="submit">Entrar</button>
+    </form>
+  </dialog>
+
+  <dialog id="addDialog" class="modal">
+    <form id="addForm" class="modal-card discovery-modal">
+      <div class="modal-head"><div><span class="eyebrow">NUEVO PROYECTO</span><h2>Agregar al Hub</h2></div><button type="button" class="ghost icon-button" data-close="addDialog">×</button></div>
+      <div class="detect-block">
+        <label>Carpeta del proyecto</label>
+        <div class="detect-row"><input id="folderInput" name="folder" placeholder=".  o  apps/mi-proyecto" required><button id="browseButton" class="ghost" type="button">Explorar</button><button id="detectButton" class="primary" type="button">Detectar</button></div>
+        <small>Puede ser un repositorio, monorepo o una carpeta con varios repositorios.</small>
+      </div>
+      <div id="discoveryPlaceholder" class="discovery-placeholder">El Hub buscará paquetes, frameworks, scripts y puertos disponibles.</div>
+      <div id="discoveryResult" hidden>
+        <div class="discovery-summary"><div><span id="repoMode" class="repo-badge">Repositorio</span><strong id="detectedTitle">Proyecto detectado</strong><small id="detectedMeta"></small></div></div>
+        <div class="form-grid project-fields">
+          <label>Nombre<input id="projectName" name="name" required minlength="2"></label>
+          <label>Color<input name="color" type="color" value="#2563eb"></label>
+          <label class="full">Descripción<input name="description" placeholder="Qué hace este proyecto"></label>
+        </div>
+        <div class="services-editor-head"><div><strong>Servicios detectados</strong><small>Elige el comando y puerto de cada uno.</small></div></div>
+        <div id="detectedServices" class="detected-services"></div>
+      </div>
+      <p class="form-error" id="addError"></p><div class="modal-actions"><button type="button" class="ghost" data-close="addDialog">Cancelar</button><button id="saveProjectButton" class="primary" type="submit" disabled>Guardar proyecto</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="folderDialog" class="modal">
+    <div class="modal-card folder-card">
+      <div class="modal-head"><div><span class="eyebrow">EXPLORADOR LOCAL</span><h2>Seleccionar carpeta</h2></div><button type="button" class="ghost icon-button" data-close="folderDialog">×</button></div>
+      <div class="folder-toolbar"><small id="folderScopeLabel">Ubicaciones autorizadas</small><button id="systemBrowseButton" class="ghost" type="button">+ Agregar ubicación</button></div>
+      <div id="folderBreadcrumbs" class="folder-breadcrumbs"></div>
+      <div id="folderList" class="folder-list" aria-live="polite"></div>
+      <p class="form-error" id="folderError"></p>
+      <div class="modal-actions"><button type="button" class="ghost" data-close="folderDialog">Cancelar</button><button id="selectFolderButton" class="primary" type="button" disabled>Usar esta carpeta</button></div>
+    </div>
+  </dialog>
+
+  <dialog id="settingsDialog" class="modal">
+    <form id="settingsForm" class="modal-card settings-card">
+      <div class="modal-head"><div><span class="eyebrow">THEME MAKER</span><h2>Estética del Hub</h2></div><button type="button" class="ghost icon-button" data-close="settingsDialog">×</button></div>
+      <section class="settings-section"><div class="settings-heading"><strong>Temas listos</strong><small>Un punto de partida, luego modifica lo que quieras.</small></div><div id="themePresets" class="theme-presets"></div></section>
+      <section class="settings-section"><div class="settings-heading"><strong>Full custom</strong><small>Colores, geometría, espacio y ambiente.</small></div>
+        <div class="theme-controls">
+          <label>Acento<input id="themeAccent" name="accent" type="color"></label>
+          <label>Fondo<input id="themeBackground" name="background" type="color"></label>
+          <label>Superficie<input id="themeSurface" name="surface" type="color"></label>
+          <label>Texto<input id="themeText" name="text" type="color"></label>
+          <label>Radio <output id="radiusValue"></output><input id="themeRadius" name="radius" type="range" min="4" max="32"></label>
+          <label>Glass <output id="glassValue"></output><input id="themeGlass" name="glass" type="range" min="0" max="30"></label>
+          <label>Glow <output id="glowValue"></output><input id="themeGlow" name="glow" type="range" min="0" max="100"></label>
+          <label>Densidad<select id="themeDensity" name="density"><option value="compact">Compacta</option><option value="comfortable">Cómoda</option><option value="spacious">Amplia</option></select></label>
+          <label>Fondo<select id="themePattern" name="pattern"><option value="aurora">Aurora</option><option value="grid">Grid</option><option value="none">Limpio</option></select></label>
+        </div>
+      </section>
+      <section class="settings-section desktop-settings"><div class="settings-heading"><strong>App de Windows</strong><small>DevHubsito puede levantarse solo al iniciar sesión.</small></div><div class="desktop-setting-row"><div><strong>Iniciar con Windows</strong><small id="autostartStatus">Comprobando disponibilidad…</small></div><label class="switch"><input id="autostartToggle" type="checkbox" disabled><span></span></label></div></section>
+      <p class="form-error" id="settingsError"></p><div class="modal-actions"><button type="button" class="ghost" data-close="settingsDialog">Cancelar</button><button class="primary" type="submit">Guardar apariencia</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="projectSettingsDialog" class="modal">
+    <form id="projectSettingsForm" class="modal-card project-settings-card">
+      <div class="modal-head"><div><span class="eyebrow">CONFIGURACIÓN PARTICULAR</span><h2 id="projectSettingsTitle">Proyecto</h2></div><button type="button" class="ghost icon-button" data-close="projectSettingsDialog">×</button></div>
+      <div class="project-identity-editor">
+        <div id="projectIconPreview" class="project-icon-preview-large"><span>PR</span></div>
+        <div><strong>Imagen del proyecto</strong><small>Usa el favicon de la app o sube una imagen propia.</small><div class="identity-actions"><button id="useFaviconButton" type="button" class="ghost">Usar favicon</button><label class="ghost file-button">Seleccionar imagen<input id="projectIconFile" type="file" accept="image/png,image/jpeg,image/webp,image/x-icon,.ico"></label></div><small>PNG, JPG, WebP o ICO · máximo 2 MB</small></div>
+      </div>
+      <div class="form-grid project-settings-fields"><label>Nombre<input id="projectSettingsName" name="name" required minlength="2" maxlength="80"></label><label>Color de la card<input id="projectSettingsColor" name="color" type="color"></label><label class="full">Descripción<input id="projectSettingsDescription" name="description" maxlength="180"></label></div>
+      <section class="danger-zone"><div><strong>Quitar del Hub</strong><small>Los archivos del proyecto no se borrarán.</small></div><button id="removeProjectButton" class="danger-button" type="button">Quitar proyecto</button></section>
+      <p class="form-error" id="projectSettingsError"></p><div class="modal-actions"><button type="button" class="ghost" data-close="projectSettingsDialog">Cancelar</button><button class="primary" type="submit">Guardar proyecto</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="logsDialog" class="modal">
+    <div class="modal-card logs-card"><div class="modal-head"><div><span class="eyebrow">SALIDA DEL PROCESO</span><h2 id="logsTitle">Logs</h2></div><button class="ghost icon-button" data-close="logsDialog">×</button></div><pre id="logsOutput">Sin logs todavía.</pre></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

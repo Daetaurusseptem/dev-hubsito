@@ -1,0 +1,13 @@
+node_modules/
+.env
+runtime-state.json
+allowed-roots.json
+settings.json
+projects.json
+uploads/
+public/uploads/
+src-tauri/target/
+src-tauri/binaries/*.exe
+src-tauri/gen/
+dist/
+*.log

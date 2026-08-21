@@ -1,0 +1,21 @@
+{
+  "name": "devhubsito",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun src/server.ts",
+    "dev": "bun --watch src/server.ts",
+    "desktop:prepare": "bun scripts/prepare-desktop.ts",
+    "desktop:dev": "bunx tauri dev",
+    "desktop:build": "bunx tauri build",
+    "desktop:doctor": "powershell -ExecutionPolicy Bypass -File scripts/desktop-doctor.ps1",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "latest",
+    "@types/bun": "latest",
+    "@types/node": "latest",
+    "typescript": "^5.9.2"
+  }
+}
