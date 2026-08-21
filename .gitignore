@@ -3,6 +3,7 @@ node_modules/
 runtime-state.json
 allowed-roots.json
 settings.json
+security.json
 projects.json
 uploads/
 public/uploads/

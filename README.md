@@ -13,11 +13,7 @@ bun run start
 
 Abre `http://localhost:4173`. Desde otro dispositivo conectado a la misma red usa la IP que aparece arriba a la izquierda.
 
-El PIN vive en `.env`:
-
-```dotenv
-DEV_HUB_PIN=un-pin-que-si-recuerdes
-```
+En el primer arranque, el onboarding permite elegir entre acceso libre en la red local o un PIN numérico de 4 a 12 dígitos. El PIN nunca se guarda en texto plano: DevHubsito conserva un hash con salt en `security.json`.
 
 ## Agregar un proyecto
 
@@ -40,6 +36,12 @@ Cada servicio lleva su propia tecnología: Angular, Express, PostgreSQL, React, 
 ## Theme Maker
 
 El engrane abre la configuración global. Aurora, Midnight, Matcha y Ember son presets; colores, radios, densidad, glass, glow y fondo se pueden mover por separado. El resultado se guarda en `settings.json`.
+
+## Side Waifu Module
+
+El onboarding también permite activar a Kira, la compañera visual del Hub. En escritorio ocupa un carril lateral y resume el estado de los servicios; en móvil se compacta como una burbuja flotante. Al pulsarla cambia de expresión.
+
+Desde **Settings → Side Waifu Module** puedes ocultarla, cambiar su nombre y tamaño, volver al personaje incluido o subir un spritesheet PNG/WebP de hasta 12 MB. Indica las columnas y filas de su cuadrícula para que DevHubsito calcule cada frame; el spritesheet incluido usa `4 × 4`.
 
 ## App de Windows
 
@@ -85,8 +87,9 @@ En desarrollo los registros están junto al proyecto y permanecen fuera de Git. 
 
 - `projects.json`: proyectos y servicios.
 - `allowed-roots.json`: ubicaciones autorizadas.
-- `settings.json`: tema.
-- `uploads/`: imágenes de las cards.
+- `settings.json`: tema y configuración de la waifu.
+- `security.json`: elección de acceso y hash del PIN, si está activado.
+- `uploads/`: imágenes de las cards y spritesheets personalizados.
 
 `projects.example.json` sirve como punto de partida limpio para otro equipo.
 

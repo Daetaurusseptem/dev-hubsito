@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/folder-browser.css">
   <link rel="stylesheet" href="/theme-maker.css">
   <link rel="stylesheet" href="/project-settings.css">
+  <link rel="stylesheet" href="/waifu.css">
 </head>
 <body>
   <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
@@ -28,6 +29,22 @@
     <section class="section-head"><div><h2>Proyectos</h2><p>Estado en tiempo real de tu entorno</p></div><div class="legend"><span><i class="dot online"></i>Activo</span><span><i class="dot external"></i>Externo</span><span><i class="dot offline"></i>Detenido</span></div></section>
     <section id="projects" class="project-grid" aria-live="polite"></section>
   </main>
+
+  <aside id="waifuRail" class="waifu-rail" hidden aria-label="Side Waifu Module">
+    <div class="waifu-bubble"><span class="waifu-online"></span><div><strong id="waifuName">Kira</strong><p id="waifuSpeech">Todo listo en tu hubsito.</p></div><button id="waifuSettingsButton" class="waifu-mini-action" type="button" title="Configurar waifu">⚙</button></div>
+    <button id="waifuCharacter" class="waifu-character" type="button" aria-label="Cambiar expresión"></button>
+    <small class="waifu-signature">SIDE WAIFU MODULE</small>
+  </aside>
+
+  <dialog id="onboardingDialog" class="modal" data-static>
+    <form id="onboardingForm" class="modal-card onboarding-card">
+      <div class="onboarding-brand"><span class="brand-mark"><img src="/devhubsito.svg" alt=""></span><span class="eyebrow">PRIMER ARRANQUE</span></div>
+      <h2>Haz tuyo el hubsito.</h2><p>Configura el acceso desde tu red y el compañero visual del taller. Podrás cambiar la waifu después.</p>
+      <section class="onboarding-section"><div class="onboarding-step">01</div><div class="onboarding-content"><strong>Acceso local</strong><small>Elige si los dispositivos de tu red necesitan un PIN.</small><label class="choice-card"><input id="onboardingPinRequired" type="checkbox" checked><span><b>Proteger con PIN</b><small>Recomendado si compartes la red Wi-Fi.</small></span></label><label id="onboardingPinField">PIN numérico<input id="onboardingPin" inputmode="numeric" autocomplete="new-password" pattern="[0-9]{4,12}" minlength="4" maxlength="12" placeholder="4 a 12 dígitos" required></label></div></section>
+      <section class="onboarding-section"><div class="onboarding-step">02</div><div class="onboarding-content"><strong>Side Waifu Module</strong><small>Una compañera reactiva para mostrar el estado de tus servicios.</small><label class="choice-card waifu-choice"><input id="onboardingWaifuEnabled" type="checkbox" checked><span><b>Activar a Kira</b><small>Usar el spritesheet incluido de 4 × 4.</small></span><span class="onboarding-waifu-preview"></span></label></div></section>
+      <p class="form-error" id="onboardingError"></p><button class="primary wide" type="submit">Entrar a DevHubsito</button>
+    </form>
+  </dialog>
 
   <dialog id="authDialog" class="modal" data-static>
     <form id="authForm" class="modal-card narrow">
@@ -89,6 +106,13 @@
         </div>
       </section>
       <section class="settings-section desktop-settings"><div class="settings-heading"><strong>App de Windows</strong><small>DevHubsito puede levantarse solo al iniciar sesión.</small></div><div class="desktop-setting-row"><div><strong>Iniciar con Windows</strong><small id="autostartStatus">Comprobando disponibilidad…</small></div><label class="switch"><input id="autostartToggle" type="checkbox" disabled><span></span></label></div></section>
+      <section class="settings-section waifu-settings"><div class="settings-heading"><strong>Side Waifu Module</strong><small>Personaliza el compañero visual y su spritesheet.</small></div>
+        <div class="waifu-settings-layout"><div id="waifuSettingsPreview" class="waifu-settings-preview"><span></span></div><div class="waifu-settings-fields">
+          <label class="choice-card compact-choice"><input id="waifuEnabled" type="checkbox"><span><b>Mostrar waifu</b><small>Panel lateral en escritorio y burbuja compacta en móvil.</small></span></label>
+          <div class="form-grid"><label>Nombre<input id="waifuCustomName" maxlength="30"></label><label>Tamaño <output id="waifuScaleValue"></output><input id="waifuScale" type="range" min="70" max="140"></label><label>Columnas<input id="waifuColumns" type="number" min="1" max="12"></label><label>Filas<input id="waifuRows" type="number" min="1" max="12"></label></div>
+          <div class="identity-actions"><label class="ghost file-button">Subir spritesheet<input id="waifuSpriteFile" type="file" accept="image/png,image/webp"></label><button id="resetWaifuButton" type="button" class="ghost">Usar Kira</button></div><small>PNG o WebP · máximo 12 MB. Indica las columnas y filas de la cuadrícula.</small>
+        </div></div>
+      </section>
       <p class="form-error" id="settingsError"></p><div class="modal-actions"><button type="button" class="ghost" data-close="settingsDialog">Cancelar</button><button class="primary" type="submit">Guardar apariencia</button></div>
     </form>
   </dialog>

@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { createConnection } from 'node:net';
 import { networkInterfaces } from 'node:os';
+import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import {
   isValidPort,
@@ -49,6 +50,22 @@ type HubSettings = {
   glow: number;
   pattern: 'aurora' | 'grid' | 'none';
   projectIcons: Record<string, string>;
+  waifu: WaifuSettings;
+};
+type WaifuSettings = {
+  enabled: boolean;
+  name: string;
+  sprite: string;
+  columns: number;
+  rows: number;
+  frame: number;
+  scale: number;
+};
+type SecuritySettings = {
+  onboardingComplete: boolean;
+  pinRequired: boolean;
+  pinSalt: string;
+  pinHash: string;
 };
 type ManagedProcess = {
   subprocess: Bun.Subprocess;
@@ -62,11 +79,11 @@ const STORAGE_DIR = path.resolve(process.env.DEVHUBSITO_DATA_DIR || HUB_DIR);
 const CONFIG_PATH = path.join(STORAGE_DIR, 'projects.json');
 const ROOTS_PATH = path.join(STORAGE_DIR, 'allowed-roots.json');
 const SETTINGS_PATH = path.join(STORAGE_DIR, 'settings.json');
+const SECURITY_PATH = path.join(STORAGE_DIR, 'security.json');
 const PUBLIC_DIR = path.resolve(process.env.DEVHUBSITO_PUBLIC_DIR || path.join(HUB_DIR, 'public'));
 const UPLOADS_DIR = path.join(STORAGE_DIR, 'uploads');
 const PORT = Number(process.env.DEV_HUB_PORT || 4173);
 const HOST = process.env.DEV_HUB_HOST || '0.0.0.0';
-const PIN = process.env.DEV_HUB_PIN || 'devhubsito';
 const BUN_BIN = process.env.BUN_BIN || (process.env.DEVHUBSITO_DESKTOP ? 'bun' : process.execPath);
 const DOCKER_BIN = process.env.DOCKER_BIN
   || 'C:\\Users\\jaime\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe';
@@ -89,7 +106,9 @@ const managed = new Map<string, ManagedProcess>();
 const DEFAULT_SETTINGS: HubSettings = {
   preset: 'aurora', accent: '#7c3aed', background: '#080b14', surface: '#111725', text: '#e8ecf7',
   radius: 20, density: 'comfortable', glass: 14, glow: 22, pattern: 'aurora', projectIcons: {},
+  waifu: { enabled: true, name: 'Kira', sprite: '/waifu-default.png', columns: 4, rows: 4, frame: 2, scale: 100 },
 };
+const DEFAULT_SECURITY: SecuritySettings = { onboardingComplete: false, pinRequired: false, pinSalt: '', pinHash: '' };
 
 function json(data: unknown, init: ResponseInit = {}): Response {
   return Response.json(data, {
@@ -110,8 +129,47 @@ async function loadSettings(): Promise<HubSettings> {
   if (!existsSync(SETTINGS_PATH)) return structuredClone(DEFAULT_SETTINGS);
   try {
     const saved = JSON.parse(await readFile(SETTINGS_PATH, 'utf8')) as Partial<HubSettings>;
-    return { ...DEFAULT_SETTINGS, ...saved, projectIcons: { ...DEFAULT_SETTINGS.projectIcons, ...(saved.projectIcons || {}) } };
+    return {
+      ...DEFAULT_SETTINGS,
+      ...saved,
+      projectIcons: { ...DEFAULT_SETTINGS.projectIcons, ...(saved.projectIcons || {}) },
+      waifu: { ...DEFAULT_SETTINGS.waifu, ...(saved.waifu || {}) },
+    };
   } catch { return structuredClone(DEFAULT_SETTINGS); }
+}
+
+async function loadSecurity(): Promise<SecuritySettings> {
+  if (!existsSync(SECURITY_PATH)) return structuredClone(DEFAULT_SECURITY);
+  try {
+    const saved = JSON.parse(await readFile(SECURITY_PATH, 'utf8')) as Partial<SecuritySettings>;
+    return { ...DEFAULT_SECURITY, ...saved };
+  } catch { return structuredClone(DEFAULT_SECURITY); }
+}
+
+function pinDigest(pin: string, salt: string): string {
+  return scryptSync(pin, salt, 32).toString('hex');
+}
+
+async function saveOnboarding(input: Record<string, unknown>): Promise<{ pinRequired: boolean; settings: HubSettings }> {
+  const current = await loadSecurity();
+  if (current.onboardingComplete) throw Object.assign(new Error('El onboarding ya fue completado'), { status: 409 });
+  const pinRequired = input.pinRequired === true;
+  const pin = String(input.pin || '');
+  if (pinRequired && !/^\d{4,12}$/.test(pin)) {
+    throw Object.assign(new Error('El PIN debe tener entre 4 y 12 dígitos'), { status: 400 });
+  }
+  const pinSalt = pinRequired ? randomBytes(16).toString('hex') : '';
+  const security: SecuritySettings = {
+    onboardingComplete: true,
+    pinRequired,
+    pinSalt,
+    pinHash: pinRequired ? pinDigest(pin, pinSalt) : '',
+  };
+  await writeFile(SECURITY_PATH, `${JSON.stringify(security, null, 2)}\n`, 'utf8');
+  const settings = await loadSettings();
+  settings.waifu.enabled = input.waifuEnabled !== false;
+  await writeFile(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+  return { pinRequired, settings };
 }
 
 function validColor(value: unknown, fallback: string): string {
@@ -127,6 +185,12 @@ async function saveSettings(input: Record<string, unknown>): Promise<HubSettings
     : current.projectIcons;
   const density = ['compact', 'comfortable', 'spacious'].includes(String(input.density)) ? input.density as HubSettings['density'] : current.density;
   const pattern = ['aurora', 'grid', 'none'].includes(String(input.pattern)) ? input.pattern as HubSettings['pattern'] : current.pattern;
+  const rawWaifu = input.waifu && typeof input.waifu === 'object' ? input.waifu as Record<string, unknown> : {};
+  const columns = Math.min(12, Math.max(1, Number(rawWaifu.columns) || current.waifu.columns));
+  const rows = Math.min(12, Math.max(1, Number(rawWaifu.rows) || current.waifu.rows));
+  const spriteCandidate = String(rawWaifu.sprite || current.waifu.sprite);
+  const sprite = spriteCandidate === '/waifu-default.png' || /^\/uploads\/[a-z0-9._-]+$/i.test(spriteCandidate)
+    ? spriteCandidate : current.waifu.sprite;
   const settings: HubSettings = {
     preset: String(input.preset || current.preset).slice(0, 30),
     accent: validColor(input.accent, current.accent), background: validColor(input.background, current.background),
@@ -134,6 +198,15 @@ async function saveSettings(input: Record<string, unknown>): Promise<HubSettings
     radius: Math.min(32, Math.max(4, Number(input.radius) || current.radius)), density,
     glass: Math.min(30, Math.max(0, Number(input.glass) || 0)),
     glow: Math.min(100, Math.max(0, Number(input.glow) || 0)), pattern, projectIcons: icons,
+    waifu: {
+      enabled: rawWaifu.enabled === undefined ? current.waifu.enabled : rawWaifu.enabled === true,
+      name: String(rawWaifu.name || current.waifu.name).trim().slice(0, 30) || 'Waifu',
+      sprite,
+      columns,
+      rows,
+      frame: Math.min(columns * rows - 1, Math.max(0, Number(rawWaifu.frame) || 0)),
+      scale: Math.min(140, Math.max(70, Number(rawWaifu.scale) || current.waifu.scale)),
+    },
   };
   await writeFile(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
   return settings;
@@ -283,9 +356,15 @@ async function serviceView(service: ServiceConfig) {
   };
 }
 
-function authorized(request: Request): boolean {
+async function authorized(request: Request): Promise<boolean> {
+  const security = await loadSecurity();
+  if (!security.onboardingComplete || !security.pinRequired) return security.onboardingComplete;
   const header = request.headers.get('authorization') || '';
-  return header === `Bearer ${PIN}` || request.headers.get('x-dev-hub-pin') === PIN;
+  const pin = header.startsWith('Bearer ') ? header.slice(7) : request.headers.get('x-dev-hub-pin') || '';
+  if (!pin || !security.pinSalt || !security.pinHash) return false;
+  const actual = Buffer.from(pinDigest(pin, security.pinSalt), 'hex');
+  const expected = Buffer.from(security.pinHash, 'hex');
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
 async function parseBody(request: Request): Promise<Record<string, unknown>> {
@@ -395,6 +474,28 @@ async function uploadProjectIcon(project: ProjectConfig, request: Request): Prom
   return project;
 }
 
+async function uploadWaifuSprite(request: Request): Promise<HubSettings> {
+  const form = await request.formData();
+  const entry = form.get('sprite');
+  if (!entry || typeof entry === 'string' || typeof entry.arrayBuffer !== 'function') {
+    throw Object.assign(new Error('Selecciona un spritesheet'), { status: 400 });
+  }
+  const file = entry as File;
+  if (file.size === 0 || file.size > 12 * 1024 * 1024) {
+    throw Object.assign(new Error('El spritesheet debe pesar máximo 12 MB'), { status: 400 });
+  }
+  const extensions: Record<string, string> = { 'image/png': 'png', 'image/webp': 'webp' };
+  const extension = extensions[file.type];
+  if (!extension) throw Object.assign(new Error('Usa un spritesheet PNG o WebP'), { status: 400 });
+  await mkdir(UPLOADS_DIR, { recursive: true });
+  const fileName = `waifu-${Date.now()}.${extension}`;
+  await writeFile(path.join(UPLOADS_DIR, fileName), new Uint8Array(await file.arrayBuffer()));
+  const settings = await loadSettings();
+  settings.waifu = { ...settings.waifu, enabled: true, sprite: `/uploads/${fileName}`, frame: 0 };
+  await writeFile(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+  return settings;
+}
+
 async function addProject(input: Record<string, unknown>): Promise<ProjectConfig> {
   const name = String(input.name || '').trim();
   const folder = String(input.folder || '').trim();
@@ -466,9 +567,17 @@ async function addProject(input: Record<string, unknown>): Promise<ProjectConfig
 
 async function api(request: Request, url: URL): Promise<Response> {
   if (url.pathname === '/api/bootstrap') {
-    return json({ name: 'DevHubsito', host: localIp(), port: PORT, requiresAuth: true });
+    const security = await loadSecurity();
+    return json({
+      name: 'DevHubsito', host: localIp(), port: PORT,
+      onboardingRequired: !security.onboardingComplete,
+      pinRequired: security.onboardingComplete && security.pinRequired,
+    });
   }
-  if (!authorized(request)) return json({ message: 'PIN incorrecto' }, { status: 401 });
+  if (url.pathname === '/api/onboarding' && request.method === 'POST') {
+    return json(await saveOnboarding(await parseBody(request)), { status: 201 });
+  }
+  if (!await authorized(request)) return json({ message: 'PIN incorrecto' }, { status: 401 });
 
   const config = await loadConfig();
   if (url.pathname === '/api/projects' && request.method === 'GET') {
@@ -480,6 +589,9 @@ async function api(request: Request, url: URL): Promise<Response> {
   }
   if (url.pathname === '/api/settings' && request.method === 'PUT') {
     return json(await saveSettings(await parseBody(request)));
+  }
+  if (url.pathname === '/api/waifu/sprite' && request.method === 'POST') {
+    return json(await uploadWaifuSprite(request));
   }
   if (url.pathname === '/api/projects' && request.method === 'POST') {
     return json(await addProject(await parseBody(request)), { status: 201 });

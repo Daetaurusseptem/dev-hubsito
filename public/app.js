@@ -1,4 +1,4 @@
-const state = { pin: localStorage.getItem('devHubPin') || '', projects: [], timer: null, discovery: null, browserPath: null, browserScope: 'allowed', settings: null, settingsDraft: null, editingProject: null, pendingProjectIcon: null, pendingIconMode: 'favicon', previewObjectUrl: null };
+const state = { pin: localStorage.getItem('devHubPin') || '', projects: [], timer: null, discovery: null, browserPath: null, browserScope: 'allowed', settings: null, settingsDraft: null, editingProject: null, pendingProjectIcon: null, pendingIconMode: 'favicon', previewObjectUrl: null, waifuFrame: null, pendingWaifuSprite: null, waifuPreviewObjectUrl: null };
 const THEME_PRESETS = {
   aurora: { name: 'Aurora', accent: '#7c3aed', background: '#080b14', surface: '#111725', text: '#e8ecf7', radius: 20, density: 'comfortable', glass: 14, glow: 22, pattern: 'aurora' },
   midnight: { name: 'Midnight', accent: '#38bdf8', background: '#030712', surface: '#0b1220', text: '#e5f2ff', radius: 12, density: 'compact', glass: 8, glow: 12, pattern: 'grid' },
@@ -53,6 +53,44 @@ function applyTheme(settings) {
   root.style.setProperty('--theme-glow', String(settings.glow / 100));
   document.body.dataset.density = settings.density; document.body.dataset.pattern = settings.pattern;
 }
+function spriteUrl(source = '') {
+  if (IS_TAURI && source.startsWith('/uploads/')) return `http://127.0.0.1:4173${source}`;
+  return source;
+}
+function frameCoordinates(frame, columns, rows) {
+  const safeColumns = Math.max(1, Number(columns) || 1); const safeRows = Math.max(1, Number(rows) || 1);
+  const safeFrame = Math.min(safeColumns * safeRows - 1, Math.max(0, Number(frame) || 0));
+  const column = safeFrame % safeColumns; const row = Math.floor(safeFrame / safeColumns);
+  return { x: safeColumns === 1 ? 0 : column / (safeColumns - 1) * 100, y: safeRows === 1 ? 0 : row / (safeRows - 1) * 100 };
+}
+function waifuMessage() {
+  const services = state.projects.flatMap(project => project.services); const running = services.filter(service => service.running).length;
+  if (!services.length) return 'Agreguemos nuestro primer proyecto.';
+  if (!running) return 'Todo está en pausa. Cuando quieras arrancamos.';
+  if (running === services.length) return `Los ${running} servicios están respondiendo.`;
+  return `${running} de ${services.length} servicios están activos.`;
+}
+function renderWaifu(settings = state.settings) {
+  const rail = $('#waifuRail'); const waifu = settings?.waifu;
+  if (!waifu?.enabled) { rail.hidden = true; document.body.classList.remove('waifu-enabled'); return; }
+  rail.hidden = false; document.body.classList.add('waifu-enabled');
+  const total = Math.max(1, waifu.columns * waifu.rows);
+  if (state.waifuFrame === null || state.waifuFrame >= total) state.waifuFrame = Math.min(waifu.frame, total - 1);
+  const position = frameCoordinates(state.waifuFrame, waifu.columns, waifu.rows);
+  rail.style.setProperty('--waifu-sprite', `url("${spriteUrl(waifu.sprite)}")`);
+  rail.style.setProperty('--waifu-bg-width', `${waifu.columns * 100}%`); rail.style.setProperty('--waifu-bg-height', `${waifu.rows * 100}%`);
+  rail.style.setProperty('--waifu-frame-x', `${position.x}%`); rail.style.setProperty('--waifu-frame-y', `${position.y}%`);
+  rail.style.setProperty('--waifu-scale', String(waifu.scale / 100));
+  $('#waifuName').textContent = waifu.name; $('#waifuSpeech').textContent = waifuMessage();
+}
+function renderWaifuSettingsPreview() {
+  const waifu = state.settingsDraft?.waifu; if (!waifu) return;
+  const preview = $('#waifuSettingsPreview'); const position = frameCoordinates(waifu.frame, waifu.columns, waifu.rows);
+  preview.style.setProperty('--preview-sprite', `url("${spriteUrl(waifu.sprite)}")`);
+  preview.style.setProperty('--preview-bg-width', `${waifu.columns * 100}%`); preview.style.setProperty('--preview-bg-height', `${waifu.rows * 100}%`);
+  preview.style.setProperty('--preview-x', `${position.x}%`); preview.style.setProperty('--preview-y', `${position.y}%`);
+  preview.style.setProperty('--preview-scale', String(waifu.scale / 100));
+}
 function statusLabel(service) { return service.ownership === 'managed' ? 'ACTIVO' : service.ownership === 'external' ? 'EXTERNO' : 'DETENIDO'; }
 function api(path, options = {}) {
   const headers = { authorization: `Bearer ${state.pin}`, ...(options.headers || {}) };
@@ -67,6 +105,7 @@ function render() {
   const running = state.projects.flatMap(p => p.services).filter(s => s.running).length;
   $('#runningCount').textContent = `${running} servicio${running === 1 ? '' : 's'} activo${running === 1 ? '' : 's'}`;
   $('#projectCount').textContent = `${state.projects.length} proyecto${state.projects.length === 1 ? '' : 's'} registrado${state.projects.length === 1 ? '' : 's'}`;
+  renderWaifu();
   if (!state.projects.length) { projectsEl.innerHTML = '<div class="empty">Agrega tu primer proyecto para comenzar.</div>'; return; }
   projectsEl.innerHTML = state.projects.map(project => {
     const allRunning = project.services.length > 0 && project.services.every(service => service.running);
@@ -85,7 +124,7 @@ function render() {
 }
 
 async function load({ quiet = false } = {}) {
-  try { const data = await api('/projects'); state.projects = data.projects; state.settings = data.settings; applyTheme(state.settings); $('#networkLabel').textContent = `${data.host}:4173`; render(); }
+  try { const data = await api('/projects'); state.projects = data.projects; state.settings = data.settings; applyTheme(state.settings); $('#networkLabel').textContent = `${data.host}:${new URL(API_ROOT, location.href).port || location.port || 4173}`; render(); }
   catch (error) { if (error.status === 401) { clearInterval(state.timer); $('#authDialog').showModal(); } else if (!quiet) toast(error.message); }
 }
 async function action(path, button) { setBusy(button, true); try { const result = await api(path, { method: 'POST' }); toast(result.message); await new Promise(r => setTimeout(r, 700)); await load(); } catch (error) { toast(error.message); } finally { setBusy(button, false); } }
@@ -173,6 +212,13 @@ function settingsFromControls() {
     surface: $('#themeSurface').value, text: $('#themeText').value, radius: Number($('#themeRadius').value),
     glass: Number($('#themeGlass').value), glow: Number($('#themeGlow').value),
     density: $('#themeDensity').value, pattern: $('#themePattern').value,
+    waifu: {
+      ...state.settingsDraft.waifu,
+      enabled: $('#waifuEnabled').checked,
+      name: $('#waifuCustomName').value.trim() || 'Waifu',
+      columns: Number($('#waifuColumns').value), rows: Number($('#waifuRows').value),
+      scale: Number($('#waifuScale').value),
+    },
   };
 }
 
@@ -184,10 +230,16 @@ function renderSettingsControls() {
   $('#themeRadius').value = settings.radius; $('#themeGlass').value = settings.glass; $('#themeGlow').value = settings.glow;
   $('#themeDensity').value = settings.density; $('#themePattern').value = settings.pattern;
   $('#radiusValue').textContent = `${settings.radius}px`; $('#glassValue').textContent = `${settings.glass}px`; $('#glowValue').textContent = `${settings.glow}%`;
+  $('#waifuEnabled').checked = settings.waifu.enabled; $('#waifuCustomName').value = settings.waifu.name;
+  $('#waifuColumns').value = settings.waifu.columns; $('#waifuRows').value = settings.waifu.rows; $('#waifuScale').value = settings.waifu.scale;
+  $('#waifuScaleValue').textContent = `${settings.waifu.scale}%`; renderWaifuSettingsPreview();
 }
 
 function openSettings() {
   state.settingsDraft = structuredClone(state.settings);
+  state.pendingWaifuSprite = null;
+  if (state.waifuPreviewObjectUrl) URL.revokeObjectURL(state.waifuPreviewObjectUrl);
+  state.waifuPreviewObjectUrl = null;
   renderSettingsControls();
   $('#settingsError').textContent = '';
   $('#settingsDialog').showModal();
@@ -204,6 +256,9 @@ async function updateAutostartControl() {
 
 function closeSettings() {
   applyTheme(state.settings);
+  renderWaifu(state.settings);
+  if (state.waifuPreviewObjectUrl) URL.revokeObjectURL(state.waifuPreviewObjectUrl);
+  state.waifuPreviewObjectUrl = null; state.pendingWaifuSprite = null;
   state.settingsDraft = null;
   $('#settingsDialog').close();
 }
@@ -236,6 +291,11 @@ document.addEventListener('click', async event => {
   const button = event.target.closest('button'); if (!button) return;
   if (button.id === 'addButton') $('#addDialog').showModal();
   if (button.id === 'settingsButton') openSettings();
+  if (button.id === 'waifuSettingsButton') openSettings();
+  if (button.id === 'waifuCharacter' && state.settings?.waifu) {
+    state.waifuFrame = (state.waifuFrame + 1) % (state.settings.waifu.columns * state.settings.waifu.rows);
+    renderWaifu();
+  }
   if (button.dataset.projectSettings) openProjectSettings(button.dataset.projectSettings);
   if (button.dataset.themePreset) {
     state.settingsDraft = { ...state.settingsDraft, ...THEME_PRESETS[button.dataset.themePreset], preset: button.dataset.themePreset };
@@ -263,6 +323,13 @@ document.addEventListener('click', async event => {
   if (button.dataset.projectAction) action(`/projects/${button.dataset.project}/${button.dataset.projectAction}`, button);
   if (button.dataset.logs) { const result = await api(`/services/${button.dataset.logs}/logs`); $('#logsTitle').textContent = button.dataset.name; $('#logsOutput').textContent = result.logs.join('\n') || 'Sin logs disponibles. Los procesos iniciados fuera del Hub no exponen su salida.'; $('#logsDialog').showModal(); }
   if (button.id === 'useFaviconButton' && state.editingProject) { state.pendingProjectIcon = null; state.pendingIconMode = 'favicon'; $('#projectIconFile').value = ''; setProjectIconPreview(projectImage({ ...state.editingProject, iconMode: 'favicon' }), state.editingProject); }
+  if (button.id === 'resetWaifuButton' && state.settingsDraft?.waifu) {
+    state.pendingWaifuSprite = null; $('#waifuSpriteFile').value = '';
+    if (state.waifuPreviewObjectUrl) URL.revokeObjectURL(state.waifuPreviewObjectUrl);
+    state.waifuPreviewObjectUrl = null;
+    state.settingsDraft.waifu = { ...state.settingsDraft.waifu, sprite: '/waifu-default.png', columns: 4, rows: 4, frame: 2 };
+    renderSettingsControls();
+  }
   if (button.id === 'removeProjectButton' && state.editingProject) { if (!confirm(`Quitar ${state.editingProject.name} del Hub? Sus archivos no se borrarán.`)) return; try { const result = await api(`/projects/${state.editingProject.id}`, { method: 'DELETE' }); closeProjectSettings(); toast(result.message); load(); } catch (error) { $('#projectSettingsError').textContent = error.message; } }
 });
 
@@ -270,14 +337,21 @@ $('#settingsForm').addEventListener('input', event => {
   if (!state.settingsDraft || event.target.closest('.desktop-settings')) return;
   state.settingsDraft = settingsFromControls();
   $('#radiusValue').textContent = `${state.settingsDraft.radius}px`; $('#glassValue').textContent = `${state.settingsDraft.glass}px`; $('#glowValue').textContent = `${state.settingsDraft.glow}%`;
-  applyTheme(state.settingsDraft);
+  applyTheme(state.settingsDraft); renderWaifuSettingsPreview();
   document.querySelectorAll('.theme-preset').forEach(button => button.classList.remove('active'));
 });
 $('#settingsForm').addEventListener('submit', async event => {
   event.preventDefault(); $('#settingsError').textContent = '';
   try {
+    if (state.pendingWaifuSprite) {
+      const upload = new FormData(); upload.append('sprite', state.pendingWaifuSprite);
+      const uploadedSettings = await api('/waifu/sprite', { method: 'POST', body: upload });
+      state.settingsDraft.waifu.sprite = uploadedSettings.waifu.sprite;
+    }
     state.settings = await api('/settings', { method: 'PUT', body: JSON.stringify(state.settingsDraft) });
-    applyTheme(state.settings); state.settingsDraft = null; $('#settingsDialog').close(); render(); toast('Apariencia guardada');
+    applyTheme(state.settings); renderWaifu(state.settings);
+    if (state.waifuPreviewObjectUrl) URL.revokeObjectURL(state.waifuPreviewObjectUrl);
+    state.waifuPreviewObjectUrl = null; state.pendingWaifuSprite = null; state.settingsDraft = null; $('#settingsDialog').close(); render(); toast('Apariencia guardada');
   } catch (error) { $('#settingsError').textContent = error.message; }
 });
 $('#autostartToggle').addEventListener('change', async event => {
@@ -287,6 +361,16 @@ $('#autostartToggle').addEventListener('change', async event => {
   try { if (toggle.checked) await autostart.enable(); else await autostart.disable(); status.textContent = toggle.checked ? 'DevHubsito arrancará al iniciar sesión' : 'Desactivado'; }
   catch (error) { toggle.checked = !toggle.checked; status.textContent = error?.message || 'No se pudo cambiar el inicio automático'; }
   finally { toggle.disabled = false; }
+});
+
+$('#waifuSpriteFile').addEventListener('change', event => {
+  const file = event.target.files?.[0]; if (!file || !state.settingsDraft?.waifu) return;
+  if (file.size > 12 * 1024 * 1024) { $('#settingsError').textContent = 'El spritesheet debe pesar máximo 12 MB'; event.target.value = ''; return; }
+  if (!['image/png', 'image/webp'].includes(file.type)) { $('#settingsError').textContent = 'Usa un spritesheet PNG o WebP'; event.target.value = ''; return; }
+  if (state.waifuPreviewObjectUrl) URL.revokeObjectURL(state.waifuPreviewObjectUrl);
+  state.waifuPreviewObjectUrl = URL.createObjectURL(file); state.pendingWaifuSprite = file;
+  state.settingsDraft.waifu = { ...state.settingsDraft.waifu, sprite: state.waifuPreviewObjectUrl, frame: 0 };
+  $('#settingsError').textContent = ''; renderWaifuSettingsPreview();
 });
 
 $('#projectIconFile').addEventListener('change', event => {
@@ -321,6 +405,20 @@ $('#detectedServices').addEventListener('input', event => { const card = event.t
 $('#detectedServices').addEventListener('change', event => { const card = event.target.closest('.detected-service'); if (card) updateCommandPreview(card); });
 
 $('#authForm').addEventListener('submit', async event => { event.preventDefault(); state.pin = $('#pinInput').value; try { await load(); localStorage.setItem('devHubPin', state.pin); $('#authError').textContent = ''; $('#authDialog').close(); state.timer = setInterval(() => load({ quiet: true }), 4000); } catch (error) { $('#authError').textContent = error.message; } });
+$('#onboardingPinRequired').addEventListener('change', event => {
+  $('#onboardingPinField').hidden = !event.currentTarget.checked;
+  $('#onboardingPin').required = event.currentTarget.checked;
+});
+$('#onboardingForm').addEventListener('submit', async event => {
+  event.preventDefault(); const submit = event.currentTarget.querySelector('button[type="submit"]'); setBusy(submit, true); $('#onboardingError').textContent = '';
+  const pinRequired = $('#onboardingPinRequired').checked; const pin = $('#onboardingPin').value;
+  try {
+    await api('/onboarding', { method: 'POST', body: JSON.stringify({ pinRequired, pin, waifuEnabled: $('#onboardingWaifuEnabled').checked }) });
+    state.pin = pinRequired ? pin : ''; if (pinRequired) localStorage.setItem('devHubPin', pin); else localStorage.removeItem('devHubPin');
+    $('#onboardingDialog').close(); await load(); state.timer = setInterval(() => load({ quiet: true }), 4000); toast('Tu hubsito está listo');
+  } catch (error) { $('#onboardingError').textContent = error.message; }
+  finally { setBusy(submit, false); }
+});
 $('#addForm').addEventListener('submit', async event => {
   event.preventDefault();
   if (!state.discovery) return;
@@ -350,4 +448,13 @@ document.querySelectorAll('dialog:not([data-static])').forEach(dialog => {
   if (dialog.id === 'settingsDialog') dialog.addEventListener('cancel', event => { event.preventDefault(); closeSettings(); });
   if (dialog.id === 'projectSettingsDialog') dialog.addEventListener('cancel', event => { event.preventDefault(); closeProjectSettings(); });
 });
-if (state.pin) { load(); state.timer = setInterval(() => load({ quiet: true }), 4000); } else $('#authDialog').showModal();
+async function initialize() {
+  try {
+    const response = await fetch(`${API_ROOT}/bootstrap`); const bootstrap = await response.json();
+    $('#networkLabel').textContent = `${bootstrap.host}:${bootstrap.port}`;
+    if (bootstrap.onboardingRequired) { $('#onboardingDialog').showModal(); return; }
+    if (bootstrap.pinRequired && !state.pin) { $('#authDialog').showModal(); return; }
+    await load(); state.timer = setInterval(() => load({ quiet: true }), 4000);
+  } catch { toast('No se pudo conectar con DevHubsito'); }
+}
+initialize();
