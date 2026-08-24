@@ -34,6 +34,9 @@ El icono grande intenta usar el favicon del servicio web. En `•••` puedes 
 Cada servicio lleva su propia tecnología: Angular, Express, PostgreSQL, React, Vue, Bun, Docker, etc. El punto de estado significa:
 
 - **Activo:** DevHubsito lo arrancó y puede mostrar logs, reiniciarlo o detenerlo.
+- **Iniciando:** el proceso ya existe, pero todavía está compilando o aún no abrió su puerto; no se permiten arranques duplicados.
+- **Sin respuesta:** el proceso sigue vivo después de 60 segundos sin abrir el puerto esperado; sus logs y controles de recuperación permanecen disponibles.
+- **Falló:** el proceso terminó antes de quedar disponible y conserva sus últimos logs para diagnosticarlo.
 - **Externo:** el puerto está ocupado por algo que arrancó fuera del Hub.
 - **Detenido:** el puerto está libre.
 
@@ -87,6 +90,7 @@ La integración sigue las guías oficiales de [sidecars](https://v2.tauri.app/de
 
 ## Roadmap
 
+- Agregar icono y branding propios al instalador de Windows en el próximo release.
 - Clonar proyectos desde una URL de GitHub en una ubicación autorizada.
 - Al terminar el clone, ejecutar el discovery normal para distinguir repositorios individuales, monorepos y carpetas con varios repos.
 - Mostrar los paquetes y servicios detectados antes de registrarlos, para que el usuario confirme comandos, puertos y qué componentes quiere adjuntar al Hub.

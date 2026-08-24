@@ -7,6 +7,24 @@ export type RuntimeService = {
   port: number;
 };
 
+export type RuntimeStatus = 'starting' | 'running' | 'external' | 'stopped' | 'failed' | 'unresponsive';
+
+export function runtimeStatusForProcess(input: {
+  portOpen: boolean;
+  tracked: boolean;
+  exitCode: number | null;
+  startedAt?: string | null;
+  now?: number;
+  startupTimeoutMs?: number;
+}): RuntimeStatus {
+  if (input.portOpen) return input.tracked && input.exitCode === null ? 'running' : 'external';
+  if (!input.tracked) return 'stopped';
+  if (input.exitCode !== null) return 'failed';
+  const startedAt = input.startedAt ? Date.parse(input.startedAt) : Number.NaN;
+  const elapsed = Number.isFinite(startedAt) ? (input.now ?? Date.now()) - startedAt : 0;
+  return elapsed >= (input.startupTimeoutMs ?? 60_000) ? 'unresponsive' : 'starting';
+}
+
 export function frontendUrlForService(service: RuntimeService, services: RuntimeService[], host: string): string | null {
   const frontend = services.find((candidate) => candidate.id !== service.id
     && candidate.kind === 'process'

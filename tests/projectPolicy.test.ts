@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { isValidPort, isValidScriptName, normalizeArgs, resolveAllowedPath, slugify } from '../src/projectPolicy';
 import { chooseScript, classifyRepository, detectFramework, discoverProject, inferPort, isWatchScript, runtimeScriptNames } from '../src/projectDiscovery';
-import { frontendUrlForService } from '../src/serviceRuntime';
+import { frontendUrlForService, runtimeStatusForProcess } from '../src/serviceRuntime';
 
 describe('Dev Hub project policy', () => {
   test('creates stable safe ids', () => {
@@ -79,5 +79,14 @@ describe('service runtime coordination', () => {
     const web = { id: 'web', name: 'Web', kind: 'process' as const, framework: 'Angular', port: 4202 };
     expect(frontendUrlForService(api, [api, web], 'localhost')).toBe('http://localhost:4202');
     expect(frontendUrlForService(web, [api, web], 'localhost')).toBeNull();
+  });
+
+  test('distinguishes slow startup, failure and an unresponsive process', () => {
+    const startedAt = '2026-08-23T00:00:00.000Z';
+    expect(runtimeStatusForProcess({ portOpen: false, tracked: true, exitCode: null, startedAt, now: Date.parse(startedAt) + 5_000 })).toBe('starting');
+    expect(runtimeStatusForProcess({ portOpen: true, tracked: true, exitCode: null, startedAt })).toBe('running');
+    expect(runtimeStatusForProcess({ portOpen: false, tracked: true, exitCode: 1, startedAt })).toBe('failed');
+    expect(runtimeStatusForProcess({ portOpen: false, tracked: true, exitCode: null, startedAt, now: Date.parse(startedAt) + 60_000 })).toBe('unresponsive');
+    expect(runtimeStatusForProcess({ portOpen: true, tracked: false, exitCode: null })).toBe('external');
   });
 });

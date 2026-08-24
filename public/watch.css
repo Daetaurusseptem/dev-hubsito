@@ -17,6 +17,20 @@
   letter-spacing: .08em;
 }
 
+.dot.running { background: #34d399; }
+.dot.starting { background: #38bdf8; box-shadow: 0 0 0 4px #38bdf820; animation: runtime-pulse 1.2s ease-in-out infinite; }
+.dot.unresponsive { background: #f59e0b; }
+.dot.failed { background: #fb7185; }
+.dot.external { background: #f59e0b; }
+.dot.stopped { background: #596178; }
+.status-pill.running { background: #34d39918; color: #53e2ad; }
+.status-pill.starting { background: #38bdf818; color: #7dd3fc; }
+.status-pill.unresponsive { background: #f59e0b18; color: #fbbf24; }
+.status-pill.failed { background: #fb718518; color: #fda4af; }
+.status-pill.external { background: #f59e0b18; color: #fbbf24; }
+.status-pill.stopped { background: #64748b18; color: #8390aa; }
+@keyframes runtime-pulse { 50% { opacity: .45; transform: scale(.78); } }
+
 .watch-badge.off {
   border-color: #64748b20;
   background: #64748b10;

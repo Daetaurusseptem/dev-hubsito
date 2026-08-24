@@ -12,7 +12,7 @@ import {
   slugify,
 } from './projectPolicy';
 import { discoverProject, isWatchScript, runtimeScriptNames } from './projectDiscovery';
-import { frontendUrlForService } from './serviceRuntime';
+import { frontendUrlForService, runtimeStatusForProcess } from './serviceRuntime';
 
 type ServiceKind = 'process' | 'docker-compose';
 type ServiceConfig = {
@@ -268,18 +268,20 @@ function isPortOpen(port: number): Promise<boolean> {
   });
 }
 
-function appendLog(serviceId: string, value: string): void {
-  const entry = managed.get(serviceId);
-  if (!entry) return;
+function appendLog(entry: ManagedProcess, value: string): void {
   const lines = value.replace(/\r/g, '').split('\n').filter(Boolean);
   entry.logs.push(...lines.map((line) => `[${new Date().toLocaleTimeString()}] ${line}`));
   if (entry.logs.length > 300) entry.logs.splice(0, entry.logs.length - 300);
 }
 
-async function capture(serviceId: string, stream: ReadableStream<Uint8Array> | null): Promise<void> {
+async function capture(entry: ManagedProcess, stream: ReadableStream<Uint8Array> | null): Promise<void> {
   if (!stream) return;
   const decoder = new TextDecoder();
-  for await (const chunk of stream) appendLog(serviceId, decoder.decode(chunk));
+  for await (const chunk of stream) appendLog(entry, decoder.decode(chunk));
+}
+
+function hasLiveManagedProcess(serviceId: string): boolean {
+  return managed.get(serviceId)?.subprocess.exitCode === null;
 }
 
 function serviceCwd(service: ServiceConfig): string {
@@ -330,8 +332,13 @@ function runtimeEnvironment(service: ServiceConfig, project?: ProjectConfig): Re
   } as Record<string, string>;
 }
 
-async function startService(service: ServiceConfig, project?: ProjectConfig): Promise<{ message: string }> {
+async function startService(service: ServiceConfig, project?: ProjectConfig): Promise<{ message: string; status?: 'starting' | 'running' }> {
   if (await isPortOpen(service.port)) return { message: 'El servicio ya está escuchando' };
+  const existing = managed.get(service.id);
+  if (existing?.subprocess.exitCode === null) {
+    return { message: 'El servicio ya se está iniciando; revisa sus logs si tarda demasiado', status: 'starting' };
+  }
+  if (existing) managed.delete(service.id);
   const command = commandFor(service, 'start');
   if (command.length === 0) throw new Error('El servicio no tiene comando de inicio');
   const subprocess = Bun.spawn(command, {
@@ -344,14 +351,15 @@ async function startService(service: ServiceConfig, project?: ProjectConfig): Pr
   });
   const entry: ManagedProcess = { subprocess, logs: [], startedAt: new Date().toISOString() };
   managed.set(service.id, entry);
-  void capture(service.id, subprocess.stdout);
-  void capture(service.id, subprocess.stderr);
+  void capture(entry, subprocess.stdout);
+  void capture(entry, subprocess.stderr);
   if (service.kind === 'docker-compose') {
     const exitCode = await subprocess.exited;
     if (exitCode !== 0) throw new Error(entry.logs.slice(-8).join('\n') || 'Docker Compose no pudo iniciar');
     managed.delete(service.id);
+    return { message: 'Servicio iniciado', status: 'running' };
   }
-  return { message: await serviceUsesWatch(service) ? 'Servicio iniciado con watch' : 'Servicio iniciado' };
+  return { message: await serviceUsesWatch(service) ? 'Servicio iniciándose con watch' : 'Servicio iniciándose', status: 'starting' };
 }
 
 async function stopTree(pid: number): Promise<void> {
@@ -375,6 +383,10 @@ async function stopService(service: ServiceConfig): Promise<{ message: string }>
     return { message: 'Servicio detenido' };
   }
   const entry = managed.get(service.id);
+  if (entry?.subprocess.exitCode !== null) {
+    managed.delete(service.id);
+    return { message: 'El proceso ya había terminado' };
+  }
   if (!entry) {
     if (await isPortOpen(service.port)) {
       throw Object.assign(new Error('El proceso fue iniciado fuera del Hub; reinícialo desde aquí para administrarlo'), { status: 409 });
@@ -387,17 +399,25 @@ async function stopService(service: ServiceConfig): Promise<{ message: string }>
 }
 
 async function serviceView(service: ServiceConfig) {
-  const running = await isPortOpen(service.port);
+  const portOpen = await isPortOpen(service.port);
   const entry = managed.get(service.id);
-  if (entry && entry.subprocess.exitCode !== null) managed.delete(service.id);
-  const ownership = running ? (managed.has(service.id) ? 'managed' : 'external') : 'stopped';
+  const runtimeStatus = runtimeStatusForProcess({
+    portOpen,
+    tracked: Boolean(entry),
+    exitCode: entry?.subprocess.exitCode ?? null,
+    startedAt: entry?.startedAt,
+  });
+  const ownership = runtimeStatus === 'external' ? 'external'
+    : ['starting', 'running', 'unresponsive'].includes(runtimeStatus) ? 'managed' : 'stopped';
   return {
     ...service,
     watch: await serviceUsesWatch(service),
-    running,
+    running: portOpen,
+    runtimeStatus,
     ownership,
     url: service.openable === false ? null : serviceUrl(service),
-    startedAt: managed.get(service.id)?.startedAt || null,
+    startedAt: entry?.startedAt || null,
+    exitCode: entry?.subprocess.exitCode ?? null,
   };
 }
 
@@ -510,7 +530,7 @@ async function addAllowedRoot(input: Record<string, unknown>) {
 
 async function projectServiceOptions(project: ProjectConfig) {
   return Promise.all(project.services.map(async (service) => {
-    const running = await isPortOpen(service.port);
+    const running = await isPortOpen(service.port) || hasLiveManagedProcess(service.id);
     const args = service.command?.[0] === '$BUN' && service.command?.[1] === 'run' ? service.command.slice(3) : [];
     if (service.kind !== 'process') {
       return { id: service.id, name: service.name, kind: service.kind, composeFile: service.composeFile, composeService: service.composeService, port: service.port, editable: false, running, currentScript: '', args, options: [] };
@@ -541,7 +561,7 @@ async function updateProject(project: ProjectConfig, input: Record<string, unkno
     if (!service || service.kind !== 'process') throw Object.assign(new Error('Servicio no válido'), { status: 400 });
     const script = String(requestedScript || '');
     if (script === service.script) continue;
-    if (await isPortOpen(service.port)) throw Object.assign(new Error(`Detén ${service.name} antes de cambiar su comando`), { status: 409 });
+    if (await isPortOpen(service.port) || hasLiveManagedProcess(service.id)) throw Object.assign(new Error(`Detén ${service.name} antes de cambiar su comando`), { status: 409 });
     const packageJson = JSON.parse(await readFile(path.join(serviceCwd(service), 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
     const scripts = packageJson.scripts || {};
     if (!isValidScriptName(script) || !scripts[script] || !runtimeScriptNames(scripts).includes(script)) {
@@ -866,24 +886,30 @@ async function api(request: Request, url: URL): Promise<Response> {
     const id = decodeURIComponent(logMatch[1]);
     const found = findService(config, id);
     if (!found) return json({ message: 'Servicio no encontrado' }, { status: 404 });
-    return json({ logs: managed.get(id)?.logs || [], managed: managed.has(id) });
+    return json({ logs: managed.get(id)?.logs || [], managed: hasLiveManagedProcess(id) });
   }
 
   const projectAction = url.pathname.match(/^\/api\/projects\/([^/]+)\/(start|stop)$/);
   if (projectAction && request.method === 'POST') {
     const project = config.projects.find((item) => item.id === decodeURIComponent(projectAction[1]));
     if (!project) return json({ message: 'Proyecto no encontrado' }, { status: 404 });
-    const results: Array<{ service: string; message: string; ok: boolean }> = [];
+    const results: Array<{ service: string; message: string; ok: boolean; status?: 'starting' | 'running' }> = [];
     const services = projectAction[2] === 'stop' ? [...project.services].reverse() : project.services;
     for (const service of services) {
       try {
         const result = projectAction[2] === 'start' ? await startService(service, project) : await stopService(service);
-        results.push({ service: service.name, message: result.message, ok: true });
+        const status = 'status' in result && (result.status === 'starting' || result.status === 'running') ? result.status : undefined;
+        results.push({ service: service.name, message: result.message, status, ok: true });
       } catch (error: any) {
         results.push({ service: service.name, message: error?.message || 'No fue posible completar la acción', ok: false });
       }
     }
-    return json({ message: `Proyecto ${projectAction[2] === 'start' ? 'iniciado' : 'detenido'}`, results });
+    const starting = projectAction[2] === 'start' && results.some(result => result.status === 'starting');
+    return json({
+      message: starting ? 'Proyecto iniciándose' : `Proyecto ${projectAction[2] === 'start' ? 'iniciado' : 'detenido'}`,
+      status: starting ? 'starting' : projectAction[2] === 'start' ? 'running' : 'stopped',
+      results,
+    });
   }
 
   const deleteMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
@@ -891,7 +917,7 @@ async function api(request: Request, url: URL): Promise<Response> {
     const id = decodeURIComponent(deleteMatch[1]);
     const project = config.projects.find((item) => item.id === id);
     if (!project) return json({ message: 'Proyecto no encontrado' }, { status: 404 });
-    if (project.services.some((service) => managed.has(service.id))) {
+    if (project.services.some((service) => hasLiveManagedProcess(service.id))) {
       return json({ message: 'Detén los servicios administrados antes de quitar el proyecto' }, { status: 409 });
     }
     config.projects = config.projects.filter((item) => item.id !== id);
