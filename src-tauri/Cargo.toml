@@ -1,6 +1,6 @@
 [package]
 name = "devhubsito"
-version = "0.2.3"
+version = "0.2.4"
 description = "DevHubsito — local project launcher by Daetaurus Jaime"
 authors = ["Daetaurus Jaime"]
 edition = "2021"

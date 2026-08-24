@@ -735,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "devhubsito"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "tauri",
  "tauri-build",
