@@ -23,6 +23,8 @@ DevHubsito distingue un repo normal, un monorepo y una carpeta con varios repos.
 
 Cuando existen varias opciones, prioriza comandos con recarga automática (`--watch`, `nodemon`, `tsx watch`, `ng serve`, Vite, Next/Nuxt/Astro dev, etc.). El selector indica **WATCH** o **REINICIO MANUAL** y las cards conservan esa señal para saber si los cambios de código se aplican sin reiniciar el servicio.
 
+El discovery también revisa `compose.yaml`, `compose.yml`, `docker-compose.yaml` y `docker-compose.yml`. Los servicios con puertos publicados —por ejemplo PostgreSQL, Redis o MySQL— aparecen junto a los paquetes para que puedas seleccionarlos. También puedes adjuntarlos después desde `••• → Adjuntar Docker` en cualquier proyecto existente.
+
 No ofrece scripts de migración, seed, reset, test, build o deploy como procesos de desarrollo. Los comandos se ejecutan sin pasar por un shell.
 
 ## Cards y servicios
@@ -75,13 +77,19 @@ bun run desktop:build
 
 El setup NSIS queda en `src-tauri/target/release/bundle/nsis/`. `desktop:build` recompila el sidecar, regenera los iconos desde `public/devhubsito.svg` y construye el instalador.
 
-Los pushes y tags `v*` también disparan `.github/workflows/build-windows.yml`; el instalador queda como artifact `DevHubsito-Windows` en GitHub Actions.
+GitHub Actions valida TypeScript y tests en cada PR o push. Al llegar a `main`, `.github/workflows/build-windows.yml` compila el instalador x64, genera `SHA256SUMS.txt`, conserva un artifact versionado durante 14 días y, si la versión de `package.json` todavía no existe, crea automáticamente el tag `v*` y una GitHub Release con ambos archivos. El workflow también admite tags manuales y ejecución manual con o sin publicación.
 
 Dentro de la app, **Settings → App de Windows → Iniciar con Windows** controla el autostart. Cuando Windows la lanza de esa forma, la ventana inicia oculta y el servidor queda disponible en la red local.
 
 Si ya arrancó oculta, vuelve a abrir DevHubsito desde Inicio: la instancia existente muestra su ventana en lugar de duplicar procesos.
 
 La integración sigue las guías oficiales de [sidecars](https://v2.tauri.app/develop/sidecar/), [autostart](https://v2.tauri.app/plugin/autostart/) e [instaladores de Windows](https://v2.tauri.app/distribute/windows-installer/) de Tauri.
+
+## Roadmap
+
+- Clonar proyectos desde una URL de GitHub en una ubicación autorizada.
+- Al terminar el clone, ejecutar el discovery normal para distinguir repositorios individuales, monorepos y carpetas con varios repos.
+- Mostrar los paquetes y servicios detectados antes de registrarlos, para que el usuario confirme comandos, puertos y qué componentes quiere adjuntar al Hub.
 
 ## Datos locales
 
@@ -97,10 +105,12 @@ En desarrollo los registros están junto al proyecto y permanecen fuera de Git. 
 
 ## Antes de subir
 
+DevHubsito es principalmente una app de Windows. Todo cambio funcional debe terminar con una compilación del instalador, no sólo con la validación del servidor web.
+
 ```powershell
 bun run typecheck
 bun test
-bun run desktop:prepare
+bun run desktop:build
 ```
 
 El repo no incluye `.env`, datos personales, ejecutables compilados ni carpetas de build.

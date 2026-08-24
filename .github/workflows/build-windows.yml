@@ -1,35 +1,132 @@
-name: Build DevHubsito for Windows
+name: Validate, build and release DevHubsito
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish a GitHub Release when this version does not exist
+        required: true
+        type: boolean
+        default: true
   push:
     branches: [main]
     tags: ['v*']
   pull_request:
     branches: [main]
 
+concurrency:
+  group: devhubsito-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+permissions:
+  contents: read
+
 jobs:
+  verify:
+    name: TypeScript and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Check TypeScript
+        run: bun run typecheck
+      - name: Run tests
+        run: bun test
+
   windows:
+    name: Windows installer
+    if: github.event_name != 'pull_request'
+    needs: verify
     runs-on: windows-latest
+    timeout-minutes: 45
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Check TypeScript and tests
+
+      - name: Resolve package version and release state
+        id: release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_REQUESTED: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_release }}
         run: |
-          bun run typecheck
-          bun test
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tag = "v$version"
+
+          if ('${{ github.ref_type }}' -eq 'tag' -and '${{ github.ref_name }}' -ne $tag) {
+            throw "El tag ${{ github.ref_name }} no coincide con package.json ($tag)."
+          }
+
+          $response = Invoke-WebRequest `
+            -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" `
+            -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' } `
+            -SkipHttpErrorCheck
+          $releaseExists = $response.StatusCode -eq 200
+          $publish = $env:PUBLISH_REQUESTED -eq 'true' -and -not $releaseExists
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "publish=$($publish.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "Release target: $tag; exists: $releaseExists; publish: $publish"
+
       - name: Build NSIS installer
         run: bun run desktop:build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: DevHubsito-Windows
-          path: src-tauri/target/release/bundle/nsis/*-setup.exe
-          if-no-files-found: error
 
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem 'src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'No se encontró el instalador NSIS.' }
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash *$($installer.Name)" | Set-Content 'src-tauri/target/release/bundle/nsis/SHA256SUMS.txt'
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DevHubsito-${{ steps.release.outputs.version }}-Windows-x64
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        if: steps.release.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $installer = Get-ChildItem 'src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'No se encontró el instalador NSIS.' }
+          $checksum = 'src-tauri/target/release/bundle/nsis/SHA256SUMS.txt'
+
+          gh release create '${{ steps.release.outputs.tag }}' $installer.FullName $checksum `
+            --repo '${{ github.repository }}' `
+            --target '${{ github.sha }}' `
+            --title 'DevHubsito ${{ steps.release.outputs.version }}' `
+            --generate-notes `
+            --latest
+
+      - name: Release summary
+        shell: pwsh
+        run: |
+          "## DevHubsito ${{ steps.release.outputs.version }}" >> $env:GITHUB_STEP_SUMMARY
+          "- Installer: NSIS x64" >> $env:GITHUB_STEP_SUMMARY
+          "- Artifact: DevHubsito-${{ steps.release.outputs.version }}-Windows-x64" >> $env:GITHUB_STEP_SUMMARY
+          "- Release publicada: ${{ steps.release.outputs.publish }}" >> $env:GITHUB_STEP_SUMMARY
