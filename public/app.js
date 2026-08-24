@@ -1,4 +1,4 @@
-const state = { pin: localStorage.getItem('devHubPin') || '', projects: [], timer: null, discovery: null, attachProjectId: null, browserPath: null, browserScope: 'allowed', settings: null, settingsDraft: null, editingProject: null, projectServiceOptions: null, pendingProjectIcon: null, pendingIconMode: 'favicon', previewObjectUrl: null, waifuFrame: null, pendingWaifuSprite: null, waifuPreviewObjectUrl: null, pendingActions: new Set(), waifuNotice: null, waifuNoticeTimer: null, waifuSnapshot: null };
+const state = { pin: localStorage.getItem('devHubPin') || '', projects: [], timer: null, discovery: null, attachProjectId: null, browserPath: null, browserScope: 'allowed', settings: null, settingsDraft: null, editingProject: null, projectServiceOptions: null, pendingProjectIcon: null, pendingIconMode: 'favicon', previewObjectUrl: null, waifuFrame: null, pendingWaifuSprite: null, waifuPreviewObjectUrl: null, pendingActions: new Set(), waifuNotice: null, waifuNoticeTimer: null, waifuSnapshot: null, shutdownInProgress: false };
 const THEME_PRESETS = {
   aurora: { name: 'Aurora', accent: '#7c3aed', background: '#080b14', surface: '#111725', text: '#e8ecf7', radius: 20, density: 'comfortable', glass: 14, glow: 22, pattern: 'aurora' },
   midnight: { name: 'Midnight', accent: '#38bdf8', background: '#030712', surface: '#0b1220', text: '#e5f2ff', radius: 12, density: 'compact', glass: 8, glow: 12, pattern: 'grid' },
@@ -25,13 +25,31 @@ async function initializeWindowChrome() {
   const syncMaximized = async () => document.documentElement.classList.toggle('window-maximized', await appWindow.isMaximized());
   $('#windowMinimize').addEventListener('click', () => appWindow.minimize());
   $('#windowMaximize').addEventListener('click', async () => { await appWindow.toggleMaximize(); await syncMaximized(); });
-  $('#windowClose').addEventListener('click', () => appWindow.close());
+  $('#windowClose').addEventListener('click', requestAppShutdown);
+  await window.__TAURI__.event.listen('shutdown-requested', requestAppShutdown);
   $('#tauriTitlebar').addEventListener('dblclick', async event => {
     if (event.target.closest('button')) return;
     await appWindow.toggleMaximize(); await syncMaximized();
   });
   await appWindow.onResized(syncMaximized);
   await syncMaximized();
+}
+
+async function requestAppShutdown() {
+  if (state.shutdownInProgress) return;
+  state.shutdownInProgress = true;
+  clearInterval(state.timer);
+  const overlay = $('#shutdownOverlay'); const status = $('#shutdownStatus');
+  overlay.hidden = false; document.body.classList.add('app-shutting-down');
+  try {
+    const result = await api('/shutdown', { method: 'POST', signal: AbortSignal.timeout(10_000) });
+    status.textContent = result.skipped ? 'Cierre automático desactivado. Cerrando DevHubsito…' : result.message;
+  } catch (error) {
+    status.textContent = 'Terminando el motor local…';
+  }
+  await new Promise(resolve => setTimeout(resolve, 300));
+  try { await window.__TAURI__.core.invoke('complete_shutdown'); }
+  catch { window.close(); }
 }
 
 function escapeHtml(value = '') { const el = document.createElement('div'); el.textContent = value; return el.innerHTML; }
@@ -323,6 +341,7 @@ function settingsFromControls() {
     surface: $('#themeSurface').value, text: $('#themeText').value, radius: Number($('#themeRadius').value),
     glass: Number($('#themeGlass').value), glow: Number($('#themeGlow').value),
     density: $('#themeDensity').value, pattern: $('#themePattern').value,
+    closeServicesOnExit: $('#closeServicesOnExit').checked,
     waifu: {
       ...state.settingsDraft.waifu,
       enabled: $('#waifuMode').value !== 'hidden',
@@ -344,6 +363,7 @@ function renderSettingsControls() {
   $('#themeRadius').value = settings.radius; $('#themeGlass').value = settings.glass; $('#themeGlow').value = settings.glow;
   $('#themeDensity').value = settings.density; $('#themePattern').value = settings.pattern;
   $('#radiusValue').textContent = `${settings.radius}px`; $('#glassValue').textContent = `${settings.glass}px`; $('#glowValue').textContent = `${settings.glow}%`;
+  $('#closeServicesOnExit').checked = settings.closeServicesOnExit !== false;
   $('#waifuMode').value = settings.waifu.mode || (settings.waifu.enabled ? 'full' : 'hidden'); $('#waifuProfile').value = settings.waifu.profile || 'responsive'; $('#waifuCustomName').value = settings.waifu.name;
   $('#waifuColumns').value = settings.waifu.columns; $('#waifuRows').value = settings.waifu.rows; $('#waifuScale').value = settings.waifu.scale;
   document.querySelectorAll('[data-waifu-frame]').forEach(input => { input.max = settings.waifu.columns * settings.waifu.rows; input.value = (settings.waifu.frames?.[input.dataset.waifuFrame] ?? settings.waifu.frame ?? 0) + 1; });
@@ -485,7 +505,9 @@ document.addEventListener('click', async event => {
 });
 
 $('#settingsForm').addEventListener('input', event => {
-  if (!state.settingsDraft || event.target.closest('.desktop-settings')) return;
+  if (!state.settingsDraft) return;
+  if (event.target.id === 'closeServicesOnExit') { state.settingsDraft.closeServicesOnExit = event.target.checked; return; }
+  if (event.target.closest('.desktop-settings')) return;
   state.settingsDraft = settingsFromControls();
   $('#radiusValue').textContent = `${state.settingsDraft.radius}px`; $('#glassValue').textContent = `${state.settingsDraft.glass}px`; $('#glowValue').textContent = `${state.settingsDraft.glow}%`;
   applyTheme(state.settingsDraft); renderWaifuSettingsPreview();
@@ -494,6 +516,7 @@ $('#settingsForm').addEventListener('input', event => {
 $('#settingsForm').addEventListener('submit', async event => {
   event.preventDefault(); $('#settingsError').textContent = '';
   try {
+    state.settingsDraft.closeServicesOnExit = $('#closeServicesOnExit').checked;
     if (state.pendingWaifuSprite) {
       const upload = new FormData(); upload.append('sprite', state.pendingWaifuSprite);
       const uploadedSettings = await api('/waifu/sprite', { method: 'POST', body: upload });

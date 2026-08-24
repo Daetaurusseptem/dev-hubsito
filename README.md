@@ -84,6 +84,8 @@ GitHub Actions valida TypeScript y tests en cada PR o push. Al llegar a `main`, 
 
 Dentro de la app, **Settings → App de Windows → Iniciar con Windows** controla el autostart. Cuando Windows la lanza de esa forma, la ventana inicia oculta y el servidor queda disponible en la red local.
 
+La opción **Cerrar servicios al salir** está activa por defecto. Al cerrar la ventana, DevHubsito muestra una pantalla de cierre, detiene solamente los procesos y servicios Docker que abrió durante esa sesión y después termina su motor local. Los procesos detectados como externos no se tocan.
+
 Si ya arrancó oculta, vuelve a abrir DevHubsito desde Inicio: la instancia existente muestra su ventana en lugar de duplicar procesos.
 
 La integración sigue las guías oficiales de [sidecars](https://v2.tauri.app/develop/sidecar/), [autostart](https://v2.tauri.app/plugin/autostart/) e [instaladores de Windows](https://v2.tauri.app/distribute/windows-installer/) de Tauri.

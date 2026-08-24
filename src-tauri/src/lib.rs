@@ -1,5 +1,15 @@
-use std::{fs, net::TcpListener, path::PathBuf, sync::Mutex};
-use tauri::{Manager, State};
+use std::{
+    fs,
+    net::TcpListener,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
+    thread,
+    time::Duration,
+};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_shell::{process::CommandChild, ShellExt};
 
@@ -9,11 +19,35 @@ const LAST_API_PORT: u16 = 4199;
 struct HubRuntime {
     port: u16,
     _child: Mutex<Option<CommandChild>>,
+    shutdown_requested: AtomicBool,
+    allow_exit: AtomicBool,
 }
 
 #[tauri::command]
 fn get_api_port(runtime: State<'_, HubRuntime>) -> u16 {
     runtime.port
+}
+
+#[tauri::command]
+fn complete_shutdown(app: AppHandle, runtime: State<'_, HubRuntime>) {
+    runtime.allow_exit.store(true, Ordering::SeqCst);
+    app.exit(0);
+}
+
+fn request_shutdown(app: &AppHandle) {
+    let runtime = app.state::<HubRuntime>();
+    if runtime.shutdown_requested.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let _ = app.emit("shutdown-requested", ());
+    let fallback_app = app.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(12));
+        let runtime = fallback_app.state::<HubRuntime>();
+        if !runtime.allow_exit.swap(true, Ordering::SeqCst) {
+            fallback_app.exit(0);
+        }
+    });
 }
 
 fn available_port() -> Option<u16> {
@@ -23,7 +57,7 @@ fn available_port() -> Option<u16> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![get_api_port])
+        .invoke_handler(tauri::generate_handler![get_api_port, complete_shutdown])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -67,6 +101,8 @@ pub fn run() {
             app.manage(HubRuntime {
                 port,
                 _child: Mutex::new(Some(spawned_child)),
+                shutdown_requested: AtomicBool::new(false),
+                allow_exit: AtomicBool::new(false),
             });
 
             if let Some(window) = app.get_webview_window("main") {
@@ -81,8 +117,26 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("DevHubsito could not start")
-        .run(|app, event| {
-            if matches!(event, tauri::RunEvent::Exit) {
+        .run(|app, event| match event {
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                ..
+            } if label == "main" => {
+                let runtime = app.state::<HubRuntime>();
+                if !runtime.allow_exit.load(Ordering::SeqCst) {
+                    api.prevent_close();
+                    request_shutdown(app);
+                }
+            }
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                let runtime = app.state::<HubRuntime>();
+                if !runtime.allow_exit.load(Ordering::SeqCst) {
+                    api.prevent_exit();
+                    request_shutdown(app);
+                }
+            }
+            tauri::RunEvent::Exit => {
                 let runtime = app.state::<HubRuntime>();
                 if let Ok(mut child) = runtime._child.lock() {
                     if let Some(child) = child.take() {
@@ -90,5 +144,6 @@ pub fn run() {
                     }
                 };
             }
+            _ => {}
         });
 }

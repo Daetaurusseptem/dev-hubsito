@@ -33,3 +33,5 @@
   border-radius: 50%;
   animation: button-spin .7s linear infinite;
 }
+
+.shutdown-overlay{position:fixed;z-index:100;inset:0;display:grid;place-content:center;justify-items:center;padding:28px;background:color-mix(in srgb,var(--theme-bg,#080b14) 94%,black);color:var(--theme-text,#e8ecf7);text-align:center}.shutdown-overlay[hidden]{display:none}.shutdown-overlay h2{margin:22px 0 7px;font-size:26px;letter-spacing:-.03em}.shutdown-overlay p{max-width:420px;margin:0;color:#8490aa;font-size:12px;line-height:1.6}.shutdown-spinner{width:44px;height:44px;border:3px solid color-mix(in srgb,var(--theme-accent,#7c3aed) 22%,transparent);border-top-color:var(--theme-accent,#7c3aed);border-radius:50%;animation:devhubsito-spin .8s linear infinite}

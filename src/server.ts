@@ -53,6 +53,7 @@ type HubSettings = {
   glow: number;
   pattern: 'aurora' | 'grid' | 'none';
   projectIcons: Record<string, string>;
+  closeServicesOnExit: boolean;
   waifu: WaifuSettings;
 };
 type WaifuSettings = {
@@ -113,9 +114,10 @@ if (existsSync(ROOTS_PATH)) {
   } catch { /* Keep environment defaults when the optional file is invalid. */ }
 }
 const managed = new Map<string, ManagedProcess>();
+const launchedByHub = new Map<string, string>();
 const DEFAULT_SETTINGS: HubSettings = {
   preset: 'aurora', accent: '#7c3aed', background: '#080b14', surface: '#111725', text: '#e8ecf7',
-  radius: 20, density: 'comfortable', glass: 14, glow: 22, pattern: 'aurora', projectIcons: {},
+  radius: 20, density: 'comfortable', glass: 14, glow: 22, pattern: 'aurora', projectIcons: {}, closeServicesOnExit: true,
   waifu: { enabled: true, mode: 'full', profile: 'responsive', name: 'Kira', sprite: '/waifu-default.png', columns: 4, rows: 4, frame: 2, scale: 100, frames: { idle: 2, focus: 0, success: 1, warning: 6, error: 11, sleep: 12 } },
 };
 const DEFAULT_SECURITY: SecuritySettings = { onboardingComplete: false, pinRequired: false, pinSalt: '', pinHash: '' };
@@ -215,6 +217,7 @@ async function saveSettings(input: Record<string, unknown>): Promise<HubSettings
     radius: Math.min(32, Math.max(4, Number(input.radius) || current.radius)), density,
     glass: Math.min(30, Math.max(0, Number(input.glass) || 0)),
     glow: Math.min(100, Math.max(0, Number(input.glow) || 0)), pattern, projectIcons: icons,
+    closeServicesOnExit: typeof input.closeServicesOnExit === 'boolean' ? input.closeServicesOnExit : current.closeServicesOnExit,
     waifu: {
       enabled: mode !== 'hidden', mode, profile,
       name: String(rawWaifu.name || current.waifu.name).trim().slice(0, 30) || 'Waifu',
@@ -351,11 +354,16 @@ async function startService(service: ServiceConfig, project?: ProjectConfig): Pr
   });
   const entry: ManagedProcess = { subprocess, logs: [], startedAt: new Date().toISOString() };
   managed.set(service.id, entry);
+  launchedByHub.set(service.id, entry.startedAt);
   void capture(entry, subprocess.stdout);
   void capture(entry, subprocess.stderr);
   if (service.kind === 'docker-compose') {
     const exitCode = await subprocess.exited;
-    if (exitCode !== 0) throw new Error(entry.logs.slice(-8).join('\n') || 'Docker Compose no pudo iniciar');
+    if (exitCode !== 0) {
+      managed.delete(service.id);
+      launchedByHub.delete(service.id);
+      throw new Error(entry.logs.slice(-8).join('\n') || 'Docker Compose no pudo iniciar');
+    }
     managed.delete(service.id);
     return { message: 'Servicio iniciado', status: 'running' };
   }
@@ -373,6 +381,23 @@ async function stopTree(pid: number): Promise<void> {
   process.kill(pid, 'SIGTERM');
 }
 
+async function listeningPid(port: number): Promise<number | null> {
+  if (process.platform !== 'win32') return null;
+  try {
+    const probe = Bun.spawn(['netstat.exe', '-ano', '-p', 'tcp'], {
+      stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', windowsHide: true,
+    });
+    const output = await new Response(probe.stdout).text();
+    await probe.exited;
+    const line = output.split(/\r?\n/).find((candidate) => {
+      const columns = candidate.trim().split(/\s+/);
+      return columns.length >= 5 && columns[0] === 'TCP' && columns[1]?.match(new RegExp(`:${port}$`)) && /LISTEN|ESCUCH/i.test(columns[3] || '');
+    });
+    const pid = Number(line?.trim().split(/\s+/).at(-1));
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch { return null; }
+}
+
 async function stopService(service: ServiceConfig): Promise<{ message: string }> {
   if (service.kind === 'docker-compose') {
     const subprocess = Bun.spawn(commandFor(service, 'stop'), {
@@ -380,14 +405,29 @@ async function stopService(service: ServiceConfig): Promise<{ message: string }>
     });
     const output = `${await new Response(subprocess.stdout).text()}${await new Response(subprocess.stderr).text()}`;
     if (await subprocess.exited !== 0) throw new Error(output || 'Docker Compose no pudo detener el servicio');
+    launchedByHub.delete(service.id);
+    managed.delete(service.id);
     return { message: 'Servicio detenido' };
   }
   const entry = managed.get(service.id);
-  if (entry?.subprocess.exitCode !== null) {
+  if (entry && entry.subprocess.exitCode !== null) {
+    if (launchedByHub.has(service.id) && await isPortOpen(service.port)) {
+      const orphanPid = await listeningPid(service.port);
+      if (!orphanPid) throw new Error(`No se pudo localizar el proceso que escucha el puerto ${service.port}`);
+      await stopTree(orphanPid);
+    }
     managed.delete(service.id);
+    launchedByHub.delete(service.id);
     return { message: 'El proceso ya había terminado' };
   }
   if (!entry) {
+    if (launchedByHub.has(service.id) && await isPortOpen(service.port)) {
+      const orphanPid = await listeningPid(service.port);
+      if (!orphanPid) throw new Error(`No se pudo localizar el proceso que escucha el puerto ${service.port}`);
+      await stopTree(orphanPid);
+      launchedByHub.delete(service.id);
+      return { message: 'Proceso huérfano detenido' };
+    }
     if (await isPortOpen(service.port)) {
       throw Object.assign(new Error('El proceso fue iniciado fuera del Hub; reinícialo desde aquí para administrarlo'), { status: 409 });
     }
@@ -395,18 +435,21 @@ async function stopService(service: ServiceConfig): Promise<{ message: string }>
   }
   await stopTree(entry.subprocess.pid);
   managed.delete(service.id);
+  launchedByHub.delete(service.id);
   return { message: 'Servicio detenido' };
 }
 
 async function serviceView(service: ServiceConfig) {
   const portOpen = await isPortOpen(service.port);
   const entry = managed.get(service.id);
-  const runtimeStatus = runtimeStatusForProcess({
-    portOpen,
-    tracked: Boolean(entry),
-    exitCode: entry?.subprocess.exitCode ?? null,
-    startedAt: entry?.startedAt,
-  });
+  const processFailed = Boolean(entry && entry.subprocess.exitCode !== null && !portOpen);
+  if (processFailed) launchedByHub.delete(service.id);
+  const runtimeStatus = processFailed ? 'failed' : runtimeStatusForProcess({
+      portOpen,
+      tracked: launchedByHub.has(service.id),
+      exitCode: entry?.subprocess.exitCode ?? null,
+      startedAt: entry?.startedAt || launchedByHub.get(service.id),
+    });
   const ownership = runtimeStatus === 'external' ? 'external'
     : ['starting', 'running', 'unresponsive'].includes(runtimeStatus) ? 'managed' : 'stopped';
   return {
@@ -418,6 +461,32 @@ async function serviceView(service: ServiceConfig) {
     url: service.openable === false ? null : serviceUrl(service),
     startedAt: entry?.startedAt || null,
     exitCode: entry?.subprocess.exitCode ?? null,
+  };
+}
+
+async function shutdownManagedServices(): Promise<{ message: string; stopped: number; failed: string[]; skipped: boolean }> {
+  const settings = await loadSettings();
+  if (!settings.closeServicesOnExit) {
+    return { message: 'Cierre automático desactivado', stopped: 0, failed: [], skipped: true };
+  }
+  const config = await loadConfig();
+  const services = config.projects.flatMap((project) => project.services).reverse();
+  let stopped = 0;
+  const failed: string[] = [];
+  for (const service of services) {
+    if (!launchedByHub.has(service.id)) continue;
+    try {
+      await stopService(service);
+      stopped += 1;
+    } catch (error: any) {
+      failed.push(`${service.name}: ${error?.message || 'no se pudo detener'}`);
+    }
+  }
+  return {
+    message: failed.length ? `Se cerraron ${stopped} servicios; ${failed.length} requieren revisión` : `Se cerraron ${stopped} servicios`,
+    stopped,
+    failed,
+    skipped: false,
   };
 }
 
@@ -806,6 +875,9 @@ async function api(request: Request, url: URL): Promise<Response> {
   }
   if (url.pathname === '/api/settings' && request.method === 'PUT') {
     return json(await saveSettings(await parseBody(request)));
+  }
+  if (url.pathname === '/api/shutdown' && request.method === 'POST') {
+    return json(await shutdownManagedServices());
   }
   if (url.pathname === '/api/waifu/sprite' && request.method === 'POST') {
     return json(await uploadWaifuSprite(request));

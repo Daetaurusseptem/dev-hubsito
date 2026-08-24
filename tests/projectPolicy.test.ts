@@ -85,6 +85,7 @@ describe('service runtime coordination', () => {
     const startedAt = '2026-08-23T00:00:00.000Z';
     expect(runtimeStatusForProcess({ portOpen: false, tracked: true, exitCode: null, startedAt, now: Date.parse(startedAt) + 5_000 })).toBe('starting');
     expect(runtimeStatusForProcess({ portOpen: true, tracked: true, exitCode: null, startedAt })).toBe('running');
+    expect(runtimeStatusForProcess({ portOpen: true, tracked: true, exitCode: 0, startedAt })).toBe('running');
     expect(runtimeStatusForProcess({ portOpen: false, tracked: true, exitCode: 1, startedAt })).toBe('failed');
     expect(runtimeStatusForProcess({ portOpen: false, tracked: true, exitCode: null, startedAt, now: Date.parse(startedAt) + 60_000 })).toBe('unresponsive');
     expect(runtimeStatusForProcess({ portOpen: true, tracked: false, exitCode: null })).toBe('external');

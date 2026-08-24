@@ -118,7 +118,7 @@
           <label>Fondo<select id="themePattern" name="pattern"><option value="aurora">Aurora</option><option value="grid">Grid</option><option value="none">Limpio</option></select></label>
         </div>
       </section>
-      <section class="settings-section desktop-settings"><div class="settings-heading"><strong>App de Windows</strong><small>DevHubsito puede levantarse solo al iniciar sesión.</small></div><div class="desktop-setting-row"><div><strong>Iniciar con Windows</strong><small id="autostartStatus">Comprobando disponibilidad…</small></div><label class="switch"><input id="autostartToggle" type="checkbox" disabled><span></span></label></div></section>
+      <section class="settings-section desktop-settings"><div class="settings-heading"><strong>App de Windows</strong><small>Controla el inicio y cierre coordinado del entorno.</small></div><div class="desktop-settings-list"><div class="desktop-setting-row"><div><strong>Iniciar con Windows</strong><small id="autostartStatus">Comprobando disponibilidad…</small></div><label class="switch"><input id="autostartToggle" type="checkbox" disabled><span></span></label></div><div class="desktop-setting-row"><div><strong>Cerrar servicios al salir</strong><small>Detiene por defecto únicamente procesos y contenedores iniciados por DevHubsito.</small></div><label class="switch"><input id="closeServicesOnExit" type="checkbox"><span></span></label></div></div></section>
       <section class="settings-section waifu-settings"><div class="settings-heading"><strong>Side Waifu Module</strong><small>Personaliza el compañero visual y su spritesheet.</small></div>
         <div class="waifu-settings-layout"><div id="waifuSettingsPreview" class="waifu-settings-preview"><span></span></div><div class="waifu-settings-fields">
           <div class="form-grid"><label>Presencia<select id="waifuMode"><option value="full">Completa</option><option value="compact">Compacta</option><option value="hidden">Oculta</option></select></label><label>Comportamiento<select id="waifuProfile"><option value="responsive">Reactiva</option><option value="calm">Calmada</option><option value="silent">Silenciosa</option></select></label><label>Nombre<input id="waifuCustomName" maxlength="30"></label><label>Tamaño <output id="waifuScaleValue"></output><input id="waifuScale" type="range" min="70" max="140"></label><label>Columnas<input id="waifuColumns" type="number" min="1" max="12"></label><label>Filas<input id="waifuRows" type="number" min="1" max="12"></label></div>
@@ -149,6 +149,7 @@
   </dialog>
 
   <div id="toast" class="toast" role="status"></div>
+  <div id="shutdownOverlay" class="shutdown-overlay" role="status" aria-live="assertive" hidden><div class="shutdown-spinner" aria-hidden="true"></div><h2>Cerrando proyectos…</h2><p id="shutdownStatus">Deteniendo de forma segura los servicios abiertos por DevHubsito.</p></div>
   <script type="module" src="/app.js"></script>
 </body>
 </html>

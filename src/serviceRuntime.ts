@@ -17,7 +17,7 @@ export function runtimeStatusForProcess(input: {
   now?: number;
   startupTimeoutMs?: number;
 }): RuntimeStatus {
-  if (input.portOpen) return input.tracked && input.exitCode === null ? 'running' : 'external';
+  if (input.portOpen) return input.tracked ? 'running' : 'external';
   if (!input.tracked) return 'stopped';
   if (input.exitCode !== null) return 'failed';
   const startedAt = input.startedAt ? Date.parse(input.startedAt) : Number.NaN;
