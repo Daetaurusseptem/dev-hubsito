@@ -12,6 +12,7 @@ import {
   slugify,
 } from './projectPolicy';
 import { discoverProject, isWatchScript, runtimeScriptNames } from './projectDiscovery';
+import { frontendUrlForService } from './serviceRuntime';
 
 type ServiceKind = 'process' | 'docker-compose';
 type ServiceConfig = {
@@ -21,6 +22,7 @@ type ServiceConfig = {
   cwd: string;
   command?: string[];
   composeService?: string;
+  composeFile?: string;
   port: number;
   path?: string;
   openable?: boolean;
@@ -90,8 +92,11 @@ const PORT = Number(process.env.DEV_HUB_PORT || 4173);
 const HOST = process.env.DEV_HUB_HOST || '0.0.0.0';
 const BUN_BIN = process.env.BUN_BIN || (process.env.DEVHUBSITO_DESKTOP ? 'bun' : process.execPath);
 const SERVER_VERSION = process.env.DEVHUBSITO_SERVER_VERSION || 'dev';
-const DOCKER_BIN = process.env.DOCKER_BIN
-  || 'C:\\Users\\jaime\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe';
+const INSTALLED_DOCKER_BIN = process.env.LOCALAPPDATA ? [
+  path.join(process.env.LOCALAPPDATA, 'Programs', 'Docker', 'Docker', 'resources', 'bin', 'docker.exe'),
+  path.join(process.env.LOCALAPPDATA, 'Programs', 'DockerDesktop', 'resources', 'bin', 'docker.exe'),
+].find(existsSync) : undefined;
+const DOCKER_BIN = process.env.DOCKER_BIN || INSTALLED_DOCKER_BIN || 'docker';
 const DEFAULT_ALLOWED_ROOTS = (process.env.DEV_HUB_ALLOWED_ROOTS || WORKSPACE_ROOT)
   .split(';')
   .map((item) => path.resolve(item.trim()))
@@ -298,7 +303,7 @@ function commandFor(service: ServiceConfig, action: 'start' | 'stop'): string[] 
       DOCKER_BIN,
       'compose',
       '-f',
-      path.join(serviceCwd(service), 'compose.yaml'),
+      path.join(serviceCwd(service), service.composeFile || 'compose.yaml'),
       action === 'start' ? 'up' : 'stop',
       ...(action === 'start' ? ['-d'] : []),
       service.composeService || '',
@@ -307,7 +312,25 @@ function commandFor(service: ServiceConfig, action: 'start' | 'stop'): string[] 
   return (service.command || []).map((part) => part === '$BUN' ? BUN_BIN : part);
 }
 
-async function startService(service: ServiceConfig): Promise<{ message: string }> {
+function serviceHost(): string {
+  return process.env.DEVHUBSITO_DESKTOP === '1' ? 'localhost' : localIp();
+}
+
+function serviceUrl(service: ServiceConfig): string {
+  return `http://${serviceHost()}:${service.port}${service.path || '/'}`;
+}
+
+function runtimeEnvironment(service: ServiceConfig, project?: ProjectConfig): Record<string, string> {
+  const frontendUrl = project ? frontendUrlForService(service, project.services, serviceHost()) : null;
+  return {
+    ...process.env,
+    ...service.env,
+    ...(frontendUrl ? { FRONTEND_URL: frontendUrl, DEV_HUB_FRONTEND_URL: frontendUrl } : {}),
+    FORCE_COLOR: '0',
+  } as Record<string, string>;
+}
+
+async function startService(service: ServiceConfig, project?: ProjectConfig): Promise<{ message: string }> {
   if (await isPortOpen(service.port)) return { message: 'El servicio ya está escuchando' };
   const command = commandFor(service, 'start');
   if (command.length === 0) throw new Error('El servicio no tiene comando de inicio');
@@ -317,7 +340,7 @@ async function startService(service: ServiceConfig): Promise<{ message: string }
     stderr: 'pipe',
     stdin: 'ignore',
     windowsHide: true,
-    env: { ...process.env, ...service.env, FORCE_COLOR: '0' },
+    env: runtimeEnvironment(service, project),
   });
   const entry: ManagedProcess = { subprocess, logs: [], startedAt: new Date().toISOString() };
   managed.set(service.id, entry);
@@ -368,15 +391,25 @@ async function serviceView(service: ServiceConfig) {
   const entry = managed.get(service.id);
   if (entry && entry.subprocess.exitCode !== null) managed.delete(service.id);
   const ownership = running ? (managed.has(service.id) ? 'managed' : 'external') : 'stopped';
-  const host = localIp();
   return {
     ...service,
     watch: await serviceUsesWatch(service),
     running,
     ownership,
-    url: service.openable === false ? null : `http://${host}:${service.port}${service.path || '/'}`,
+    url: service.openable === false ? null : serviceUrl(service),
     startedAt: managed.get(service.id)?.startedAt || null,
   };
+}
+
+async function openService(service: ServiceConfig): Promise<{ message: string }> {
+  if (service.openable === false) throw Object.assign(new Error('Este servicio no tiene acceso web'), { status: 409 });
+  if (!await isPortOpen(service.port)) throw Object.assign(new Error('Inicia el servicio antes de abrirlo'), { status: 409 });
+  const url = serviceUrl(service);
+  const command = process.platform === 'win32' ? ['explorer.exe', url]
+    : process.platform === 'darwin' ? ['open', url] : ['xdg-open', url];
+  const opener = Bun.spawn(command, { stdout: 'ignore', stderr: 'ignore', stdin: 'ignore', windowsHide: true });
+  void opener.exited;
+  return { message: 'Abriendo en tu navegador' };
 }
 
 async function authorized(request: Request): Promise<boolean> {
@@ -480,7 +513,7 @@ async function projectServiceOptions(project: ProjectConfig) {
     const running = await isPortOpen(service.port);
     const args = service.command?.[0] === '$BUN' && service.command?.[1] === 'run' ? service.command.slice(3) : [];
     if (service.kind !== 'process') {
-      return { id: service.id, name: service.name, kind: service.kind, port: service.port, editable: false, running, currentScript: '', args, options: [] };
+      return { id: service.id, name: service.name, kind: service.kind, composeFile: service.composeFile, composeService: service.composeService, port: service.port, editable: false, running, currentScript: '', args, options: [] };
     }
     try {
       const packageJson = JSON.parse(await readFile(path.join(serviceCwd(service), 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
@@ -602,6 +635,44 @@ async function addProject(input: Record<string, unknown>): Promise<ProjectConfig
     if (relativeToProject.startsWith('..') || path.isAbsolute(relativeToProject) || !resolveAllowedPath(packageFolder, ALLOWED_ROOTS)) {
       throw Object.assign(new Error('Uno de los paquetes está fuera de la carpeta seleccionada'), { status: 400 });
     }
+    const port = Number(raw.port);
+    if (!isValidPort(port)) throw Object.assign(new Error('Todos los puertos deben estar entre 1024 y 65535'), { status: 400 });
+    if (usedPorts.has(port)) {
+      throw Object.assign(new Error(`El puerto ${port} está repetido o ya está registrado`), { status: 409 });
+    }
+    const serviceName = String(raw.name || path.basename(packageFolder)).trim().slice(0, 80);
+    if (String(raw.kind) === 'docker-compose') {
+      const composeFile = path.basename(String(raw.composeFile || ''));
+      const composeService = String(raw.composeService || '');
+      if (!['compose.yaml', 'compose.yml', 'docker-compose.yaml', 'docker-compose.yml'].includes(composeFile.toLowerCase())
+        || !/^[a-zA-Z0-9_.-]{1,100}$/.test(composeService)) {
+        throw Object.assign(new Error('El servicio Docker seleccionado no es válido'), { status: 400 });
+      }
+      const composePath = path.join(packageFolder, composeFile);
+      if (!existsSync(composePath)) throw Object.assign(new Error(`No existe ${composeFile} en ${relativePath}`), { status: 400 });
+      let definitions: Record<string, unknown> = {};
+      try {
+        const compose = Bun.YAML.parse(await readFile(composePath, 'utf8')) as Record<string, unknown>;
+        definitions = compose.services && typeof compose.services === 'object' ? compose.services as Record<string, unknown> : {};
+      } catch {
+        throw Object.assign(new Error(`No se pudo leer ${composeFile}`), { status: 400 });
+      }
+      if (!Object.hasOwn(definitions, composeService)) throw Object.assign(new Error(`El servicio ${composeService} ya no existe en ${composeFile}`), { status: 400 });
+      usedPorts.add(port);
+      services.push({
+        id: `${id}-${slugify(serviceName) || 'docker'}-${services.length + 1}`,
+        name: serviceName,
+        kind: 'docker-compose',
+        cwd: packageFolder,
+        composeFile,
+        composeService,
+        framework: String(raw.framework || 'Docker').slice(0, 50),
+        port,
+        path: '/',
+        openable: raw.openable === true,
+      });
+      continue;
+    }
     const packagePath = path.join(packageFolder, 'package.json');
     if (!existsSync(packagePath)) throw Object.assign(new Error(`No existe package.json en ${relativePath}`), { status: 400 });
     const packageJson = JSON.parse(await readFile(packagePath, 'utf8')) as { name?: string; scripts?: Record<string, string> };
@@ -609,18 +680,14 @@ async function addProject(input: Record<string, unknown>): Promise<ProjectConfig
     if (!isValidScriptName(script) || !packageJson.scripts?.[script] || !runtimeScriptNames(packageJson.scripts).includes(script)) {
       throw Object.assign(new Error(`El script ${String(script || '')} no existe en ${relativePath}/package.json`), { status: 400 });
     }
-    const port = Number(raw.port);
-    if (!isValidPort(port)) throw Object.assign(new Error('Todos los puertos deben estar entre 1024 y 65535'), { status: 400 });
-    if (usedPorts.has(port) || await isPortOpen(port)) {
-      throw Object.assign(new Error(`El puerto ${port} está repetido, registrado u ocupado`), { status: 409 });
-    }
+    if (await isPortOpen(port)) throw Object.assign(new Error(`El puerto ${port} está ocupado`), { status: 409 });
     usedPorts.add(port);
     const workspaceRelative = path.relative(WORKSPACE_ROOT, packageFolder);
     const cwd = workspaceRelative === '' ? '.' : workspaceRelative.startsWith('..') || path.isAbsolute(workspaceRelative) ? packageFolder : workspaceRelative;
-    const serviceName = String(raw.name || packageJson.name || path.basename(packageFolder)).trim().slice(0, 80);
+    const processServiceName = String(raw.name || packageJson.name || path.basename(packageFolder)).trim().slice(0, 80);
     services.push({
-      id: `${id}-${slugify(serviceName) || 'service'}-${services.length + 1}`,
-      name: serviceName,
+      id: `${id}-${slugify(processServiceName) || 'service'}-${services.length + 1}`,
+      name: processServiceName,
       kind: 'process',
       cwd,
       command: ['$BUN', 'run', String(script), ...normalizeArgs(raw.args)],
@@ -643,6 +710,55 @@ async function addProject(input: Record<string, unknown>): Promise<ProjectConfig
   config.projects.push(project);
   await saveConfig(config);
   return project;
+}
+
+async function attachDockerServices(project: ProjectConfig, input: Record<string, unknown>): Promise<ProjectConfig> {
+  const folder = String(input.folder || '').trim();
+  const projectPath = resolveAllowedPath(folder, ALLOWED_ROOTS);
+  if (!projectPath || !existsSync(projectPath)) throw Object.assign(new Error('La carpeta no existe o está fuera de las raíces permitidas'), { status: 400 });
+  const requested = Array.isArray(input.services)
+    ? input.services.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')) : [];
+  if (!requested.length) throw Object.assign(new Error('Selecciona al menos un servicio Docker'), { status: 400 });
+  const config = await loadConfig();
+  const current = config.projects.find((item) => item.id === project.id);
+  if (!current) throw Object.assign(new Error('Proyecto no encontrado'), { status: 404 });
+  const usedPorts = new Set<number>([PORT, ...config.projects.flatMap((item) => item.services.map((service) => service.port))]);
+  const draft = await addDockerServicesToProject(current, projectPath, requested, usedPorts);
+  config.projects = config.projects.map((item) => item.id === draft.id ? draft : item);
+  await saveConfig(config);
+  return draft;
+}
+
+async function addDockerServicesToProject(project: ProjectConfig, projectPath: string, requested: Record<string, unknown>[], usedPorts: Set<number>): Promise<ProjectConfig> {
+  const additions: ServiceConfig[] = [];
+  for (const raw of requested) {
+    const relativePath = String(raw.relativePath || '.');
+    const folder = path.resolve(projectPath, relativePath);
+    const relative = path.relative(projectPath, folder);
+    if (relative.startsWith('..') || path.isAbsolute(relative) || !resolveAllowedPath(folder, ALLOWED_ROOTS)) {
+      throw Object.assign(new Error('La ubicación de Docker está fuera de la carpeta seleccionada'), { status: 400 });
+    }
+    const composeFile = path.basename(String(raw.composeFile || ''));
+    const composeService = String(raw.composeService || '');
+    if (!['compose.yaml', 'compose.yml', 'docker-compose.yaml', 'docker-compose.yml'].includes(composeFile.toLowerCase())
+      || !/^[a-zA-Z0-9_.-]{1,100}$/.test(composeService)) throw Object.assign(new Error('El servicio Docker seleccionado no es válido'), { status: 400 });
+    const composePath = path.join(folder, composeFile);
+    let definitions: Record<string, unknown> = {};
+    try {
+      const compose = Bun.YAML.parse(await readFile(composePath, 'utf8')) as Record<string, unknown>;
+      definitions = compose.services && typeof compose.services === 'object' ? compose.services as Record<string, unknown> : {};
+    } catch { throw Object.assign(new Error(`No se pudo leer ${composeFile}`), { status: 400 }); }
+    if (!Object.hasOwn(definitions, composeService)) throw Object.assign(new Error(`El servicio ${composeService} ya no existe en ${composeFile}`), { status: 400 });
+    const port = Number(raw.port);
+    if (!isValidPort(port) || usedPorts.has(port)) throw Object.assign(new Error(`El puerto ${port || ''} no está disponible`), { status: 409 });
+    if (project.services.some((service) => service.kind === 'docker-compose' && path.resolve(service.cwd) === folder && service.composeFile === composeFile && service.composeService === composeService)) {
+      throw Object.assign(new Error(`${composeService} ya está adjunto al proyecto`), { status: 409 });
+    }
+    usedPorts.add(port);
+    const name = String(raw.name || composeService).trim().slice(0, 80);
+    additions.push({ id: `${project.id}-${slugify(name) || 'docker'}-${project.services.length + additions.length + 1}`, name, kind: 'docker-compose', cwd: folder, composeFile, composeService, framework: String(raw.framework || 'Docker').slice(0, 50), port, path: '/', openable: raw.openable === true });
+  }
+  return { ...project, services: [...project.services, ...additions] };
 }
 
 async function api(request: Request, url: URL): Promise<Response> {
@@ -714,7 +830,14 @@ async function api(request: Request, url: URL): Promise<Response> {
       await stopService(found.service);
       await Bun.sleep(350);
     }
-    return json(await startService(found.service));
+    return json(await startService(found.service, found.project));
+  }
+
+  const openMatch = url.pathname.match(/^\/api\/services\/([^/]+)\/open$/);
+  if (openMatch && request.method === 'POST') {
+    const found = findService(config, decodeURIComponent(openMatch[1]));
+    if (!found) return json({ message: 'Servicio no encontrado' }, { status: 404 });
+    return json(await openService(found.service));
   }
 
   const projectIconMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/icon$/);
@@ -722,6 +845,13 @@ async function api(request: Request, url: URL): Promise<Response> {
     const project = config.projects.find((item) => item.id === decodeURIComponent(projectIconMatch[1]));
     if (!project) return json({ message: 'Proyecto no encontrado' }, { status: 404 });
     return json(await uploadProjectIcon(project, request));
+  }
+
+  const dockerAttachMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/docker-services$/);
+  if (dockerAttachMatch && request.method === 'POST') {
+    const project = config.projects.find((item) => item.id === decodeURIComponent(dockerAttachMatch[1]));
+    if (!project) return json({ message: 'Proyecto no encontrado' }, { status: 404 });
+    return json(await attachDockerServices(project, await parseBody(request)), { status: 201 });
   }
 
   const projectUpdateMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
@@ -747,7 +877,7 @@ async function api(request: Request, url: URL): Promise<Response> {
     const services = projectAction[2] === 'stop' ? [...project.services].reverse() : project.services;
     for (const service of services) {
       try {
-        const result = projectAction[2] === 'start' ? await startService(service) : await stopService(service);
+        const result = projectAction[2] === 'start' ? await startService(service, project) : await stopService(service);
         results.push({ service: service.name, message: result.message, ok: true });
       } catch (error: any) {
         results.push({ service: service.name, message: error?.message || 'No fue posible completar la acción', ok: false });
@@ -761,7 +891,7 @@ async function api(request: Request, url: URL): Promise<Response> {
     const id = decodeURIComponent(deleteMatch[1]);
     const project = config.projects.find((item) => item.id === id);
     if (!project) return json({ message: 'Proyecto no encontrado' }, { status: 404 });
-    if (project.services.some((service) => managed.has(service.id) || service.kind === 'docker-compose')) {
+    if (project.services.some((service) => managed.has(service.id))) {
       return json({ message: 'Detén los servicios administrados antes de quitar el proyecto' }, { status: 409 });
     }
     config.projects = config.projects.filter((item) => item.id !== id);

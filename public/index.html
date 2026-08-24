@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/titlebar.css">
   <link rel="stylesheet" href="/discovery.css">
+  <link rel="stylesheet" href="/docker.css">
   <link rel="stylesheet" href="/watch.css">
   <link rel="stylesheet" href="/folder-browser.css">
   <link rel="stylesheet" href="/theme-maker.css">
@@ -61,18 +62,18 @@
   <dialog id="authDialog" class="modal" data-static>
     <form id="authForm" class="modal-card narrow">
       <span class="modal-icon">⌘</span><h2>Conecta con tu Dev Hub</h2><p>Ingresa el PIN local para administrar procesos desde este dispositivo.</p>
-      <label>PIN<input id="pinInput" type="password" autocomplete="current-password" placeholder="••••••" required></label>
+      <label>PIN<input id="pinInput" type="password" inputmode="numeric" autocomplete="current-password" pattern="[0-9]{4,12}" minlength="4" maxlength="12" placeholder="••••••" required></label>
       <p class="form-error" id="authError"></p><button class="primary wide" type="submit">Entrar</button>
     </form>
   </dialog>
 
   <dialog id="addDialog" class="modal">
     <form id="addForm" class="modal-card discovery-modal">
-      <div class="modal-head"><div><span class="eyebrow">NUEVO PROYECTO</span><h2>Agregar al Hub</h2></div><button type="button" class="ghost icon-button" data-close="addDialog">×</button></div>
+      <div class="modal-head"><div><span id="addEyebrow" class="eyebrow">NUEVO PROYECTO</span><h2 id="addDialogTitle">Agregar al Hub</h2></div><button type="button" class="ghost icon-button" data-close="addDialog">×</button></div>
       <div class="detect-block">
         <label>Carpeta del proyecto</label>
         <div class="detect-row"><input id="folderInput" name="folder" placeholder=".  o  apps/mi-proyecto" required><button id="browseButton" class="ghost" type="button">Explorar</button><button id="detectButton" class="primary" type="button">Detectar</button></div>
-        <small>Puede ser un repositorio, monorepo o una carpeta con varios repositorios.</small>
+        <small id="addFolderHelp">Puede ser un repositorio, monorepo o una carpeta con varios repositorios.</small>
       </div>
       <div id="discoveryPlaceholder" class="discovery-placeholder">El Hub buscará paquetes, frameworks, scripts y puertos disponibles.</div>
       <div id="discoveryResult" hidden>
@@ -137,7 +138,7 @@
         <div><strong>Imagen del proyecto</strong><small>Usa el favicon de la app o sube una imagen propia.</small><div class="identity-actions"><button id="useFaviconButton" type="button" class="ghost">Usar favicon</button><label class="ghost file-button">Seleccionar imagen<input id="projectIconFile" type="file" accept="image/png,image/jpeg,image/webp,image/x-icon,.ico"></label></div><small>PNG, JPG, WebP o ICO · máximo 2 MB</small></div>
       </div>
       <div class="form-grid project-settings-fields"><label>Nombre<input id="projectSettingsName" name="name" required minlength="2" maxlength="80"></label><label>Color de la card<input id="projectSettingsColor" name="color" type="color"></label><label class="full">Descripción<input id="projectSettingsDescription" name="description" maxlength="180"></label></div>
-      <section class="project-runtime-settings"><div class="project-runtime-heading"><div><strong>Comandos de inicio</strong><small>Elige el script predeterminado para cada servicio.</small></div><span>PACKAGE.JSON</span></div><div id="projectServiceCommands" class="project-service-commands"><div class="service-config-loading">Leyendo scripts disponibles…</div></div></section>
+      <section class="project-runtime-settings"><div class="project-runtime-heading"><div><strong>Servicios del proyecto</strong><small>Configura scripts o adjunta servicios de Docker Compose.</small></div><button id="attachDockerButton" class="ghost" type="button">+ Adjuntar Docker</button></div><div id="projectServiceCommands" class="project-service-commands"><div class="service-config-loading">Leyendo scripts disponibles…</div></div></section>
       <section class="danger-zone"><div><strong>Quitar del Hub</strong><small>Los archivos del proyecto no se borrarán.</small></div><button id="removeProjectButton" class="danger-button" type="button">Quitar proyecto</button></section>
       <p class="form-error" id="projectSettingsError"></p><div class="modal-actions"><button type="button" class="ghost" data-close="projectSettingsDialog">Cancelar</button><button class="primary" type="submit">Guardar proyecto</button></div>
     </form>

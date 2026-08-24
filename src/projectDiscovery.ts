@@ -21,6 +21,17 @@ export type DiscoveredPackage = FrameworkDetection & {
   suggestedPort: number;
 };
 
+export type DiscoveredComposeService = {
+  name: string;
+  composeService: string;
+  composeFile: string;
+  relativePath: string;
+  framework: string;
+  image: string;
+  suggestedPort: number;
+  openable: boolean;
+};
+
 type PackageJson = {
   name?: string;
   scripts?: Record<string, string>;
@@ -30,6 +41,34 @@ type PackageJson = {
 };
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.nuxt', '.angular', 'coverage', '.cache']);
+const COMPOSE_FILES = new Set(['compose.yaml', 'compose.yml', 'docker-compose.yaml', 'docker-compose.yml']);
+
+function composeFramework(serviceName: string, image: string): string {
+  const value = `${serviceName} ${image}`.toLowerCase();
+  if (value.includes('postgres')) return 'PostgreSQL';
+  if (value.includes('mysql') || value.includes('mariadb')) return value.includes('mariadb') ? 'MariaDB' : 'MySQL';
+  if (value.includes('mongo')) return 'MongoDB';
+  if (value.includes('redis')) return 'Redis';
+  if (value.includes('rabbitmq')) return 'RabbitMQ';
+  if (value.includes('elasticsearch')) return 'Elasticsearch';
+  if (value.includes('minio')) return 'MinIO';
+  return image ? image.split('/').pop()?.split(':')[0] || 'Docker' : 'Docker';
+}
+
+function publishedPort(value: unknown): number | null {
+  if (typeof value === 'number') return isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const withoutProtocol = value.split('/')[0].replace(/\$\{[^}:]+:-?(\d+)\}/g, '$1');
+    const parts = withoutProtocol.split(':');
+    const candidate = Number(parts.length > 1 ? parts.at(-2) : parts[0]);
+    return candidate >= 1024 && candidate <= 65535 ? candidate : null;
+  }
+  if (value && typeof value === 'object') {
+    const port = Number((value as Record<string, unknown>).published);
+    return port >= 1024 && port <= 65535 ? port : null;
+  }
+  return null;
+}
 
 export function detectFramework(packageJson: PackageJson, files: Set<string> = new Set()): FrameworkDetection {
   const dependencies = { ...packageJson.dependencies, ...packageJson.devDependencies };
@@ -104,6 +143,62 @@ async function packageFolders(root: string, maxDepth = 3): Promise<string[]> {
   return [...new Set(found)];
 }
 
+async function composeFiles(root: string, maxDepth = 3): Promise<string[]> {
+  const found: string[] = [];
+  async function walk(folder: string, depth: number): Promise<void> {
+    const entries = await readdir(folder, { withFileTypes: true });
+    found.push(...entries.filter((entry) => entry.isFile() && COMPOSE_FILES.has(entry.name.toLowerCase())).map((entry) => path.join(folder, entry.name)));
+    if (depth >= maxDepth) return;
+    await Promise.all(entries
+      .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink() && !IGNORED_DIRS.has(entry.name))
+      .map((entry) => walk(path.join(folder, entry.name), depth + 1)));
+  }
+  await walk(root, 0);
+  return [...new Set(found)];
+}
+
+async function discoverComposeServices(
+  root: string,
+  scanRoots: string[],
+  reservedPorts: Set<number>,
+  isOpen: (port: number) => Promise<boolean>,
+): Promise<DiscoveredComposeService[]> {
+  const files = [...new Set((await Promise.all(scanRoots.map((folder) => composeFiles(folder)))).flat())];
+  const services: DiscoveredComposeService[] = [];
+  for (const file of files) {
+    let document: Record<string, unknown>;
+    try {
+      document = Bun.YAML.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const definitions = document.services && typeof document.services === 'object'
+      ? document.services as Record<string, unknown> : {};
+    for (const [composeService, rawDefinition] of Object.entries(definitions)) {
+      const definition = rawDefinition && typeof rawDefinition === 'object' ? rawDefinition as Record<string, unknown> : {};
+      const image = typeof definition.image === 'string' ? definition.image : '';
+      const ports = Array.isArray(definition.ports) ? definition.ports : [];
+      const preferred = ports.map(publishedPort).find((port): port is number => port !== null);
+      if (!preferred) continue;
+      const suggestedPort = preferred;
+      reservedPorts.add(preferred);
+      const folder = path.dirname(file);
+      const framework = composeFramework(composeService, image);
+      services.push({
+        name: framework === 'Docker' ? composeService : framework,
+        composeService,
+        composeFile: path.basename(file),
+        relativePath: path.relative(root, folder) || '.',
+        framework,
+        image,
+        suggestedPort,
+        openable: !['PostgreSQL', 'MySQL', 'MariaDB', 'MongoDB', 'Redis', 'RabbitMQ'].includes(framework),
+      });
+    }
+  }
+  return services;
+}
+
 async function nextFreePort(preferred: number, reserved: Set<number>, isOpen: (port: number) => Promise<boolean>): Promise<number> {
   let candidate = preferred;
   while (candidate <= 65535 && (reserved.has(candidate) || await isOpen(candidate))) candidate += 1;
@@ -123,7 +218,6 @@ export async function discoverProject(
   const gitRoots = [root, ...childFolders].filter((folder) => existsSync(path.join(folder, '.git')));
   const scanRoots = gitRoots.length > 1 && !existsSync(path.join(root, '.git')) ? gitRoots : [root];
   const folders = [...new Set((await Promise.all(scanRoots.map((folder) => packageFolders(folder)))).flat())];
-  if (folders.length === 0) throw new Error('No se encontraron package.json en esta carpeta');
   const gitRootCount = gitRoots.length;
   const rootPackage = existsSync(path.join(root, 'package.json'))
     ? JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')) as PackageJson
@@ -152,12 +246,14 @@ export async function discoverProject(
       suggestedPort: await nextFreePort(preferredPort, reservedPorts, isOpen),
     });
   }
-  if (packages.length === 0) throw new Error('Se encontraron paquetes, pero ninguno tiene scripts ejecutables');
+  const dockerServices = await discoverComposeServices(root, [...new Set([root, ...scanRoots])], reservedPorts, isOpen);
+  if (packages.length === 0 && dockerServices.length === 0) throw new Error('No se encontraron servicios ejecutables ni servicios Docker Compose con puertos publicados');
   return {
     name: rootPackage?.name || path.basename(root),
     folder: root,
     repositoryMode: classifyRepository(packages.length, gitRootCount, hasWorkspaceMarker),
     gitRootCount,
     packages,
+    dockerServices,
   };
 }

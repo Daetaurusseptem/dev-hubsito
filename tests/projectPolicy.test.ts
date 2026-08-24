@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { isValidPort, isValidScriptName, normalizeArgs, resolveAllowedPath, slugify } from '../src/projectPolicy';
-import { chooseScript, classifyRepository, detectFramework, inferPort, isWatchScript, runtimeScriptNames } from '../src/projectDiscovery';
+import { chooseScript, classifyRepository, detectFramework, discoverProject, inferPort, isWatchScript, runtimeScriptNames } from '../src/projectDiscovery';
+import { frontendUrlForService } from '../src/serviceRuntime';
 
 describe('Dev Hub project policy', () => {
   test('creates stable safe ids', () => {
@@ -48,5 +51,32 @@ describe('project framework discovery', () => {
     expect(isWatchScript('dev', 'tsx watch server.ts')).toBe(true);
     expect(isWatchScript('start', 'node --watch server.js')).toBe(true);
     expect(runtimeScriptNames({ dev: 'bun --watch src/server.ts', 'desktop:prepare': 'bun scripts/prepare-desktop.ts' })).toEqual(['dev']);
+  });
+
+  test('discovers selectable services from Docker Compose', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'devhubsito-compose-'));
+    try {
+      await mkdir(path.join(root, 'infra'));
+      await mkdir(path.join(root, 'repo-a', '.git'), { recursive: true });
+      await mkdir(path.join(root, 'repo-b', '.git'), { recursive: true });
+      await writeFile(path.join(root, 'infra', 'compose.yaml'), `services:\n  postgres:\n    image: postgres:17\n    ports:\n      - "5432:5432"\n  worker:\n    image: example/worker:latest\n`);
+      const discovery = await discoverProject(root, new Set([4173]), async () => false);
+      expect(discovery.packages).toEqual([]);
+      expect(discovery.dockerServices).toEqual([expect.objectContaining({
+        composeService: 'postgres', composeFile: 'compose.yaml', relativePath: 'infra',
+        framework: 'PostgreSQL', suggestedPort: 5432, openable: false,
+      })]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('service runtime coordination', () => {
+  test('uses the frontend port selected by the Hub for backend CORS', () => {
+    const api = { id: 'api', name: 'API', kind: 'process' as const, framework: 'Express', port: 3001 };
+    const web = { id: 'web', name: 'Web', kind: 'process' as const, framework: 'Angular', port: 4202 };
+    expect(frontendUrlForService(api, [api, web], 'localhost')).toBe('http://localhost:4202');
+    expect(frontendUrlForService(web, [api, web], 'localhost')).toBeNull();
   });
 });

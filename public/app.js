@@ -1,4 +1,4 @@
-const state = { pin: localStorage.getItem('devHubPin') || '', projects: [], timer: null, discovery: null, browserPath: null, browserScope: 'allowed', settings: null, settingsDraft: null, editingProject: null, projectServiceOptions: null, pendingProjectIcon: null, pendingIconMode: 'favicon', previewObjectUrl: null, waifuFrame: null, pendingWaifuSprite: null, waifuPreviewObjectUrl: null, pendingActions: new Set(), waifuNotice: null, waifuNoticeTimer: null, waifuSnapshot: null };
+const state = { pin: localStorage.getItem('devHubPin') || '', projects: [], timer: null, discovery: null, attachProjectId: null, browserPath: null, browserScope: 'allowed', settings: null, settingsDraft: null, editingProject: null, projectServiceOptions: null, pendingProjectIcon: null, pendingIconMode: 'favicon', previewObjectUrl: null, waifuFrame: null, pendingWaifuSprite: null, waifuPreviewObjectUrl: null, pendingActions: new Set(), waifuNotice: null, waifuNoticeTimer: null, waifuSnapshot: null };
 const THEME_PRESETS = {
   aurora: { name: 'Aurora', accent: '#7c3aed', background: '#080b14', surface: '#111725', text: '#e8ecf7', radius: 20, density: 'comfortable', glass: 14, glow: 22, pattern: 'aurora' },
   midnight: { name: 'Midnight', accent: '#38bdf8', background: '#030712', surface: '#0b1220', text: '#e5f2ff', radius: 12, density: 'compact', glass: 8, glow: 12, pattern: 'grid' },
@@ -179,17 +179,23 @@ function render() {
       <div class="project-actions"><button class="ghost" data-project-action="${allRunning ? 'stop' : 'start'}" data-project="${project.id}">${allRunning ? '■ Detener' : '▶ Iniciar'} todo</button><button class="ghost" data-project-settings="${project.id}" title="Configurar proyecto">•••</button></div></header>
       <div class="services">${project.services.map(service => `
         <div class="service"><div class="service-head"><div><div class="service-meta"><i class="dot ${service.ownership === 'managed' ? 'online' : service.ownership === 'external' ? 'external' : 'offline'}"></i>${technologyMarkup(service)}<strong>${escapeHtml(service.name)}</strong><span class="status-pill ${service.ownership}">${statusLabel(service)}</span>${service.watch ? '<span class="watch-pill">WATCH</span>' : ''}</div><span class="port">${escapeHtml(service.framework || service.kind)} · :${service.port}${service.watch ? ' · recarga automática' : ' · reinicio manual'}${service.ownership === 'external' ? ' · fuera del Hub' : ''}</span></div>
-        <div class="service-actions">${service.url && service.running ? `<a class="open-link" href="${service.url}" target="_blank" rel="noreferrer">Abrir ↗</a>` : ''}
+        <div class="service-actions">${service.url && service.running ? `<button class="open-link" type="button" data-open-service="${escapeHtml(service.id)}" data-open-url="${escapeHtml(service.url)}">Abrir ↗</button>` : ''}
         ${service.ownership === 'managed' ? `<button class="service-button" data-logs="${service.id}" data-name="${escapeHtml(service.name)}">Logs</button><button class="service-button stop" data-service-action="stop" data-service="${service.id}">Detener</button><button class="service-button" data-service-action="restart" data-service="${service.id}">Reiniciar</button>` : service.ownership === 'external' && service.kind === 'docker-compose' ? `<button class="service-button stop" data-service-action="stop" data-service="${service.id}">Detener</button><button class="service-button" data-service-action="restart" data-service="${service.id}">Reiniciar</button>` : service.ownership === 'external' ? `<button class="service-button" disabled title="Iniciado fuera del Hub">No administrado</button>` : `<button class="service-button start" data-service-action="start" data-service="${service.id}">Iniciar</button>`}</div></div></div>`).join('')}</div>
     </article>`;
   }).join('');
   document.querySelectorAll('[data-project-image]').forEach(image => image.addEventListener('error', () => image.remove()));
 }
 
-async function load({ quiet = false } = {}) {
+async function load({ quiet = false, propagate = false } = {}) {
   if (quiet && state.pendingActions.size) return;
   try { const data = await api('/projects'); const previous = state.waifuSnapshot; state.projects = data.projects; state.settings = data.settings; state.waifuSnapshot = serviceSnapshot(data.projects); applyTheme(state.settings); $('#networkLabel').textContent = `${data.host}:${new URL(API_ROOT, location.href).port || location.port || 4173}`; if (!previous || JSON.stringify(previous) !== JSON.stringify(state.waifuSnapshot)) announceWaifuSnapshot(previous || state.waifuSnapshot, state.waifuSnapshot, !previous); render(); }
-  catch (error) { if (error.status === 401) { clearInterval(state.timer); $('#authDialog').showModal(); } else if (!quiet) toast(error.message); }
+  catch (error) {
+    if (error.status === 401) {
+      clearInterval(state.timer); state.pin = ''; localStorage.removeItem('devHubPin');
+      if (!$('#authDialog').open) $('#authDialog').showModal();
+    } else if (!quiet) toast(error.message);
+    if (propagate) throw error;
+  }
 }
 async function action(path, button, { wholeProject = false } = {}) {
   if (state.pendingActions.has(path) || button.disabled) return;
@@ -205,6 +211,16 @@ async function action(path, button, { wholeProject = false } = {}) {
 
 function repositoryLabel(mode) { return mode === 'multi-repo' ? 'VARIOS REPOS' : mode === 'monorepo' ? 'MONOREPO' : 'REPO ÚNICO'; }
 function defaultArgs(pkg) { return [...pkg.hostArgs, ...(pkg.hostArgs.length ? ['--port', String(pkg.suggestedPort)] : [])].join(' '); }
+function dockerDiscoveryCard(service, index) {
+  return `<article class="detected-service docker-service" data-index="${index}" data-relative="${escapeHtml(service.relativePath)}" data-framework="${escapeHtml(service.framework)}" data-kind="docker-compose" data-compose-file="${escapeHtml(service.composeFile)}" data-compose-service="${escapeHtml(service.composeService)}">
+    <header><label class="service-toggle"><input class="include-service" type="checkbox" checked><span></span></label><div><strong>${escapeHtml(service.name)}</strong><small>${escapeHtml(service.composeFile)} · ${escapeHtml(service.composeService)}</small></div><div class="detected-badges"><span class="framework-badge">${escapeHtml(service.framework)}</span><span class="docker-badge">DOCKER</span></div></header>
+    <div class="service-config-grid docker-config-grid">
+      <label>Nombre<input class="detected-name" value="${escapeHtml(service.name)}" required></label>
+      <label>Puerto publicado<input class="detected-port" type="number" min="1024" max="65535" value="${service.suggestedPort}" required></label>
+      <label>Acceso<span class="inline-check"><input class="detected-openable" type="checkbox" ${service.openable ? 'checked' : ''}> Mostrar botón Abrir</span></label>
+    </div><code class="command-preview">docker compose -f ${escapeHtml(service.composeFile)} up -d ${escapeHtml(service.composeService)}</code>
+  </article>`;
+}
 function renderDiscovery(discovery) {
   state.discovery = discovery;
   $('#discoveryPlaceholder').hidden = true;
@@ -212,9 +228,10 @@ function renderDiscovery(discovery) {
   $('#saveProjectButton').disabled = false;
   $('#repoMode').textContent = repositoryLabel(discovery.repositoryMode);
   $('#detectedTitle').textContent = discovery.name;
-  $('#detectedMeta').textContent = `${discovery.packages.length} paquete${discovery.packages.length === 1 ? '' : 's'} · ${discovery.gitRootCount} raíz${discovery.gitRootCount === 1 ? '' : 'es'} Git`;
-  $('#projectName').value = discovery.name;
-  $('#detectedServices').innerHTML = discovery.packages.map((pkg, index) => `
+  const dockerServices = discovery.dockerServices || [];
+  $('#detectedMeta').textContent = `${discovery.packages.length} paquete${discovery.packages.length === 1 ? '' : 's'} · ${dockerServices.length} servicio${dockerServices.length === 1 ? '' : 's'} Docker`;
+  if (!state.attachProjectId) $('#projectName').value = discovery.name;
+  const packageCards = state.attachProjectId ? '' : discovery.packages.map((pkg, index) => `
     <article class="detected-service" data-index="${index}" data-relative="${escapeHtml(pkg.relativePath)}" data-framework="${escapeHtml(pkg.framework)}" data-kind="${escapeHtml(pkg.kind)}">
       <header><label class="service-toggle"><input class="include-service" type="checkbox" checked><span></span></label><div><strong>${escapeHtml(pkg.name)}</strong><small>${escapeHtml(pkg.relativePath)}</small></div><div class="detected-badges"><span class="framework-badge">${escapeHtml(pkg.framework)}</span><span class="watch-badge ${pkg.watchEnabled ? '' : 'off'}">${pkg.watchEnabled ? 'WATCH' : 'REINICIO MANUAL'}</span></div></header>
       <div class="service-config-grid">
@@ -226,9 +243,12 @@ function renderDiscovery(discovery) {
       </div>
       <code class="command-preview">bun run ${escapeHtml(pkg.suggestedScript)} ${escapeHtml(defaultArgs(pkg))}</code>
     </article>`).join('');
+  $('#detectedServices').innerHTML = `${packageCards}${dockerServices.map(dockerDiscoveryCard).join('')}` || '<div class="discovery-placeholder">No se encontraron servicios Docker Compose con puertos publicados.</div>';
+  $('#saveProjectButton').disabled = state.attachProjectId ? dockerServices.length === 0 : discovery.packages.length + dockerServices.length === 0;
 }
 
 function updateCommandPreview(card) {
+  if (card.dataset.kind === 'docker-compose') { card.classList.toggle('excluded', !card.querySelector('.include-service').checked); return; }
   const script = card.querySelector('.detected-script').value;
   const watch = card.querySelector('.detected-script').selectedOptions[0]?.dataset.watch === 'true';
   const argsInput = card.querySelector('.detected-args');
@@ -238,6 +258,17 @@ function updateCommandPreview(card) {
   card.querySelector('.command-preview').textContent = `bun run ${script}${args ? ` ${args}` : ''}`;
   const watchBadge = card.querySelector('.watch-badge'); watchBadge.textContent = watch ? 'WATCH' : 'REINICIO MANUAL'; watchBadge.classList.toggle('off', !watch);
   card.classList.toggle('excluded', !card.querySelector('.include-service').checked);
+}
+
+function openAddDialog(project = null) {
+  state.discovery = null; state.attachProjectId = project?.id || null;
+  $('#addForm').reset(); $('#discoveryResult').hidden = true; $('#discoveryPlaceholder').hidden = false; $('#saveProjectButton').disabled = true; $('#addError').textContent = '';
+  $('#addEyebrow').textContent = project ? 'DOCKER COMPOSE' : 'NUEVO PROYECTO';
+  $('#addDialogTitle').textContent = project ? `Adjuntar a ${project.name}` : 'Agregar al Hub';
+  $('#addFolderHelp').textContent = project ? 'Selecciona la carpeta que contiene el archivo Compose.' : 'Puede ser un repositorio, monorepo o una carpeta con varios repositorios.';
+  $('.project-fields').hidden = Boolean(project); $('#repoMode').hidden = Boolean(project);
+  $('#saveProjectButton').textContent = project ? 'Adjuntar servicios' : 'Guardar proyecto';
+  $('#addDialog').showModal();
 }
 
 async function detectFolder(button) {
@@ -361,7 +392,7 @@ function renderProjectServiceCommands(services) {
   const container = $('#projectServiceCommands'); state.projectServiceOptions = services;
   if (!services.length) { container.innerHTML = '<div class="service-config-loading">Este proyecto no tiene servicios configurables.</div>'; return; }
   container.innerHTML = services.map(service => {
-    if (!service.editable) return `<article class="project-service-command"><div><strong>${escapeHtml(service.name)}</strong><small>${service.kind === 'docker-compose' ? 'Gestionado desde compose.yaml' : escapeHtml(service.error || 'Sin scripts ejecutables')}</small></div><div class="project-service-control"><code>Configuración externa</code></div></article>`;
+    if (!service.editable) return `<article class="project-service-command"><div><strong>${escapeHtml(service.name)}</strong><small>${service.kind === 'docker-compose' ? `Gestionado desde ${escapeHtml(service.composeFile || 'compose.yaml')}` : escapeHtml(service.error || 'Sin scripts ejecutables')}</small></div><div class="project-service-control"><code>Configuración externa</code></div></article>`;
     const currentExists = service.options.some(option => option.script === service.currentScript);
     const options = `${currentExists ? '' : `<option value="${escapeHtml(service.currentScript)}" selected disabled>${escapeHtml(service.currentScript || 'Script no disponible')}</option>`}${service.options.map(option => `<option value="${escapeHtml(option.script)}" data-watch="${option.watch}" ${option.script === service.currentScript ? 'selected' : ''}>bun run ${escapeHtml(option.script)}${option.watch ? ' · watch' : ''}</option>`).join('')}`;
     const current = service.options.find(option => option.script === service.currentScript); const watch = current?.watch === true;
@@ -395,7 +426,7 @@ function closeProjectSettings() {
 
 document.addEventListener('click', async event => {
   const button = event.target.closest('button'); if (!button) return;
-  if (button.id === 'addButton') $('#addDialog').showModal();
+  if (button.id === 'addButton') openAddDialog();
   if (button.id === 'settingsButton') openSettings();
   if (button.id === 'waifuSettingsButton') openSettings();
   if (button.id === 'waifuCharacter' && state.settings?.waifu) {
@@ -425,6 +456,16 @@ document.addEventListener('click', async event => {
   else if (button.dataset.close === 'projectSettingsDialog') closeProjectSettings();
   else if (button.dataset.close) $(`#${button.dataset.close}`).close();
   if (button.dataset.serviceAction) action(`/services/${button.dataset.service}/${button.dataset.serviceAction}`, button);
+  if (button.dataset.openService) {
+    if (IS_TAURI) {
+      setBusy(button, true, 'Abriendo…');
+      try { await api(`/services/${button.dataset.openService}/open`, { method: 'POST' }); }
+      catch (error) { toast(error.message); }
+      finally { setBusy(button, false); }
+    } else {
+      window.open(button.dataset.openUrl, '_blank', 'noopener,noreferrer');
+    }
+  }
   if (button.dataset.projectAction) action(`/projects/${button.dataset.project}/${button.dataset.projectAction}`, button, { wholeProject: true });
   if (button.dataset.logs) { const result = await api(`/services/${button.dataset.logs}/logs`); $('#logsTitle').textContent = button.dataset.name; $('#logsOutput').textContent = result.logs.join('\n') || 'Sin logs disponibles. Los procesos iniciados fuera del Hub no exponen su salida.'; $('#logsDialog').showModal(); }
   if (button.id === 'useFaviconButton' && state.editingProject) { state.pendingProjectIcon = null; state.pendingIconMode = 'favicon'; $('#projectIconFile').value = ''; setProjectIconPreview(projectImage({ ...state.editingProject, iconMode: 'favicon' }), state.editingProject); }
@@ -436,6 +477,7 @@ document.addEventListener('click', async event => {
     renderSettingsControls();
   }
   if (button.id === 'removeProjectButton' && state.editingProject) { if (!confirm(`Quitar ${state.editingProject.name} del Hub? Sus archivos no se borrarán.`)) return; try { const result = await api(`/projects/${state.editingProject.id}`, { method: 'DELETE' }); closeProjectSettings(); toast(result.message); load(); } catch (error) { $('#projectSettingsError').textContent = error.message; } }
+  if (button.id === 'attachDockerButton' && state.editingProject) { const project = state.editingProject; closeProjectSettings(); openAddDialog(project); }
 });
 
 $('#settingsForm').addEventListener('input', event => {
@@ -514,7 +556,16 @@ $('#projectSettingsForm').addEventListener('submit', async event => {
 $('#detectedServices').addEventListener('input', event => { const card = event.target.closest('.detected-service'); if (card) updateCommandPreview(card); });
 $('#detectedServices').addEventListener('change', event => { const card = event.target.closest('.detected-service'); if (card) updateCommandPreview(card); });
 
-$('#authForm').addEventListener('submit', async event => { event.preventDefault(); state.pin = $('#pinInput').value; try { await load(); localStorage.setItem('devHubPin', state.pin); $('#authError').textContent = ''; $('#authDialog').close(); state.timer = setInterval(() => load({ quiet: true }), 4000); } catch (error) { $('#authError').textContent = error.message; } });
+$('#authForm').addEventListener('submit', async event => {
+  event.preventDefault(); const submit = event.currentTarget.querySelector('button[type="submit"]'); const candidate = $('#pinInput').value;
+  setBusy(submit, true, 'Validando…'); $('#authError').textContent = ''; state.pin = candidate;
+  try {
+    await load({ propagate: true });
+    state.pin = candidate; localStorage.setItem('devHubPin', candidate); $('#pinInput').value = ''; $('#authDialog').close();
+    clearInterval(state.timer); state.timer = setInterval(() => load({ quiet: true }), 4000);
+  } catch (error) { $('#authError').textContent = error.message; $('#pinInput').focus(); }
+  finally { setBusy(submit, false); }
+});
 $('#onboardingPinRequired').addEventListener('change', event => {
   $('#onboardingPinField').hidden = !event.currentTarget.checked;
   $('#onboardingPin').required = event.currentTarget.checked;
@@ -532,11 +583,17 @@ $('#onboardingForm').addEventListener('submit', async event => {
 $('#addForm').addEventListener('submit', async event => {
   event.preventDefault();
   if (!state.discovery) return;
-  const form = new FormData(event.currentTarget);
+  const addForm = event.currentTarget;
+  const form = new FormData(addForm);
   const input = Object.fromEntries(form);
   input.services = [...document.querySelectorAll('.detected-service')]
     .filter(card => card.querySelector('.include-service').checked)
-    .map(card => ({
+    .map(card => card.dataset.kind === 'docker-compose' ? {
+      kind: 'docker-compose', relativePath: card.dataset.relative, framework: card.dataset.framework,
+      composeFile: card.dataset.composeFile, composeService: card.dataset.composeService,
+      name: card.querySelector('.detected-name').value, port: Number(card.querySelector('.detected-port').value),
+      openable: card.querySelector('.detected-openable').checked,
+    } : ({
       relativePath: card.dataset.relative,
       framework: card.dataset.framework,
       kind: card.dataset.kind,
@@ -547,11 +604,13 @@ $('#addForm').addEventListener('submit', async event => {
       openable: card.querySelector('.detected-openable').checked,
       args: card.querySelector('.detected-args').value.match(/(?:[^\s"]+|"[^"]*")+/g)?.map(x => x.replace(/^"|"$/g, '')) || [],
     }));
+  if (!input.services.length) { $('#addError').textContent = 'Selecciona al menos un servicio'; return; }
   $('#addError').textContent = '';
   try {
-    await api('/projects', { method: 'POST', body: JSON.stringify(input) });
-    event.currentTarget.reset(); state.discovery = null; $('#discoveryResult').hidden = true; $('#discoveryPlaceholder').hidden = false; $('#saveProjectButton').disabled = true;
-    $('#addDialog').close(); toast('Proyecto agregado'); load();
+    const attaching = state.attachProjectId;
+    await api(attaching ? `/projects/${attaching}/docker-services` : '/projects', { method: 'POST', body: JSON.stringify(input) });
+    addForm.reset(); state.discovery = null; $('#discoveryResult').hidden = true; $('#discoveryPlaceholder').hidden = false; $('#saveProjectButton').disabled = true;
+    state.attachProjectId = null; $('#addDialog').close(); toast(attaching ? 'Servicios Docker adjuntados' : 'Proyecto agregado'); load();
   } catch (error) { $('#addError').textContent = error.message; }
 });
 document.querySelectorAll('dialog:not([data-static])').forEach(dialog => {
