@@ -12,10 +12,11 @@ describe('Dev Hub project policy', () => {
   });
 
   test('keeps project paths inside configured roots', () => {
-    const root = path.resolve('C:/workspace');
+    const root = path.resolve('workspace');
+    const outside = path.resolve(path.dirname(root), 'outside');
     expect(resolveAllowedPath('apps/demo', [root])).toBe(path.resolve(root, 'apps/demo'));
     expect(resolveAllowedPath('../secret', [root])).toBeNull();
-    expect(resolveAllowedPath('D:/outside', [root])).toBeNull();
+    expect(resolveAllowedPath(outside, [root])).toBeNull();
   });
 
   test('validates executable metadata without accepting shell text', () => {
